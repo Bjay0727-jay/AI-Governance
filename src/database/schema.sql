@@ -368,3 +368,24 @@ CREATE INDEX idx_incidents_tenant ON incidents(tenant_id);
 CREATE INDEX idx_incidents_asset ON incidents(ai_asset_id);
 CREATE INDEX idx_incidents_status ON incidents(tenant_id, status);
 CREATE INDEX idx_incidents_severity ON incidents(tenant_id, severity);
+
+-- ============================================================================
+-- EVIDENCE - Documentation and evidence linked to governance entities
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS evidence (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL,  -- ai_asset, risk_assessment, impact_assessment, vendor_assessment, control_implementation
+    entity_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    evidence_type TEXT NOT NULL DEFAULT 'document' CHECK (evidence_type IN (
+        'document', 'link', 'screenshot', 'test_result', 'policy', 'audit_report', 'certification', 'other'
+    )),
+    url TEXT,
+    uploaded_by TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_evidence_entity ON evidence(entity_type, entity_id);
+CREATE INDEX idx_evidence_tenant ON evidence(tenant_id);

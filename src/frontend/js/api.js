@@ -206,4 +206,12 @@ const API = {
     const qs = new URLSearchParams(params).toString();
     return this.request('GET', `/audit-log${qs ? '?' + qs : ''}`);
   },
+
+  // --- Evidence ---
+  getEvidence(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/evidence${qs ? '?' + qs : ''}`);
+  },
+  createEvidence(body) { return this.request('POST', '/evidence', body); },
+  deleteEvidence(id) { return this.request('DELETE', `/evidence/${id}`); },
 };

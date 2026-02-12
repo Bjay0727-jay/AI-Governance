@@ -862,6 +862,213 @@ describe('Audit Log', () => {
   });
 });
 
+// ==================== EVIDENCE MANAGEMENT ====================
+
+describe('Evidence Management', () => {
+  let evidenceId;
+
+  test('POST /api/v1/evidence creates evidence record', async () => {
+    const res = await request(app)
+      .post('/api/v1/evidence')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        entity_type: 'ai_asset',
+        entity_id: assetId,
+        title: 'Validation Test Results',
+        evidence_type: 'test_result',
+        description: 'Q1 2026 validation testing results',
+        url: 'https://docs.example.com/validation-q1-2026',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.title).toBe('Validation Test Results');
+    expect(res.body.data.evidence_type).toBe('test_result');
+    evidenceId = res.body.data.id;
+  });
+
+  test('POST /api/v1/evidence validates entity_type', async () => {
+    const res = await request(app)
+      .post('/api/v1/evidence')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        entity_type: 'invalid_type',
+        entity_id: assetId,
+        title: 'Bad Evidence',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/entity_type/i);
+  });
+
+  test('POST /api/v1/evidence requires title', async () => {
+    const res = await request(app)
+      .post('/api/v1/evidence')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        entity_type: 'ai_asset',
+        entity_id: assetId,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /api/v1/evidence blocked for viewers', async () => {
+    const res = await request(app)
+      .post('/api/v1/evidence')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({
+        entity_type: 'ai_asset',
+        entity_id: assetId,
+        title: 'Blocked Evidence',
+      });
+    expect(res.status).toBe(403);
+  });
+
+  test('GET /api/v1/evidence lists evidence', async () => {
+    const res = await request(app)
+      .get('/api/v1/evidence')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+  });
+
+  test('GET /api/v1/evidence filters by entity', async () => {
+    const res = await request(app)
+      .get(`/api/v1/evidence?entity_type=ai_asset&entity_id=${assetId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.every(e => e.entity_type === 'ai_asset')).toBe(true);
+  });
+
+  test('POST /api/v1/evidence creates second evidence for risk assessment', async () => {
+    const res = await request(app)
+      .post('/api/v1/evidence')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        entity_type: 'risk_assessment',
+        entity_id: riskAssessmentId,
+        title: 'Risk Analysis Report',
+        evidence_type: 'audit_report',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.evidence_type).toBe('audit_report');
+  });
+
+  test('DELETE /api/v1/evidence/:id deletes evidence', async () => {
+    const res = await request(app)
+      .delete(`/api/v1/evidence/${evidenceId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/deleted/i);
+  });
+
+  test('DELETE /api/v1/evidence/:id returns 404 for unknown ID', async () => {
+    const res = await request(app)
+      .delete('/api/v1/evidence/nonexistent-id')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+// ==================== EXPORT ====================
+
+describe('Export', () => {
+  test('GET /api/v1/export/assets returns CSV', async () => {
+    const res = await request(app)
+      .get('/api/v1/export/assets')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.headers['content-disposition']).toMatch(/ai-assets\.csv/);
+    expect(res.text).toContain('Name');
+    expect(res.text).toContain('TestML Model');
+  });
+
+  test('GET /api/v1/export/risk-assessments returns CSV', async () => {
+    const res = await request(app)
+      .get('/api/v1/export/risk-assessments')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.text).toContain('Patient Safety');
+  });
+
+  test('GET /api/v1/export/compliance returns CSV', async () => {
+    const res = await request(app)
+      .get('/api/v1/export/compliance')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.text).toContain('Control ID');
+  });
+
+  test('GET /api/v1/export/vendor-assessments returns CSV', async () => {
+    const res = await request(app)
+      .get('/api/v1/export/vendor-assessments')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.text).toContain('AI Corp');
+  });
+
+  test('GET /api/v1/export/incidents returns CSV', async () => {
+    const res = await request(app)
+      .get('/api/v1/export/incidents')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+  });
+
+  test('GET /api/v1/export/evidence returns CSV', async () => {
+    const res = await request(app)
+      .get('/api/v1/export/evidence')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+  });
+
+  test('Export endpoints require authentication', async () => {
+    const res = await request(app).get('/api/v1/export/assets');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ==================== FILTERED QUERIES ====================
+
+describe('Filtered Queries', () => {
+  test('GET /api/v1/risk-assessments?ai_asset_id filters by asset', async () => {
+    const res = await request(app)
+      .get(`/api/v1/risk-assessments?ai_asset_id=${assetId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.every(r => r.ai_asset_id === assetId)).toBe(true);
+  });
+
+  test('GET /api/v1/impact-assessments?ai_asset_id filters by asset', async () => {
+    const res = await request(app)
+      .get(`/api/v1/impact-assessments?ai_asset_id=${assetId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data.every(ia => ia.ai_asset_id === assetId)).toBe(true);
+  });
+
+  test('GET /api/v1/incidents?ai_asset_id filters by asset', async () => {
+    const res = await request(app)
+      .get(`/api/v1/incidents?ai_asset_id=${assetId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.every(i => i.ai_asset_id === assetId)).toBe(true);
+  });
+
+  test('GET /api/v1/risk-assessments without filter returns all', async () => {
+    const res = await request(app)
+      .get('/api/v1/risk-assessments')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+  });
+});
+
 // ==================== SECURITY ====================
 
 describe('Security', () => {

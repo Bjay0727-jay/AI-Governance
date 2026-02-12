@@ -49,6 +49,34 @@ try {
   console.log('Database initialized with schema and compliance controls.\n');
 }
 
+// Ensure evidence table exists (migration for existing databases)
+try {
+  db.prepare('SELECT 1 FROM evidence LIMIT 1').first();
+} catch {
+  const evidenceSQL = `
+    CREATE TABLE IF NOT EXISTS evidence (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      evidence_type TEXT NOT NULL DEFAULT 'document',
+      url TEXT,
+      uploaded_by TEXT NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_entity ON evidence(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_tenant ON evidence(tenant_id);
+  `;
+  if (db.db && typeof db.db.exec === 'function') {
+    db.db.exec(evidenceSQL);
+  } else {
+    db.exec(evidenceSQL);
+  }
+  console.log('Evidence table created.\n');
+}
+
 // --- Build Environment Object (mimics Cloudflare env) ---
 const env = {
   DB: db,
@@ -526,12 +554,16 @@ function calculateOverallRisk(scores) {
 }
 
 app.get('/api/v1/risk-assessments', requireAuth, (req, res) => {
+  const { ai_asset_id } = req.query;
+  let where = 'WHERE r.tenant_id = ?';
+  const params = [req.user.tenant_id];
+  if (ai_asset_id) { where += ' AND r.ai_asset_id = ?'; params.push(ai_asset_id); }
   const results = db.prepare(
     `SELECT r.*, a.name as asset_name, a.category as asset_category, a.risk_tier,
       u.first_name || ' ' || u.last_name as assessor_name
      FROM risk_assessments r JOIN ai_assets a ON r.ai_asset_id = a.id JOIN users u ON r.assessor_id = u.id
-     WHERE r.tenant_id = ? ORDER BY r.created_at DESC`
-  ).bind(req.user.tenant_id).all();
+     ${where} ORDER BY r.created_at DESC`
+  ).bind(...params).all();
   res.json({ data: results.results });
 });
 
@@ -632,11 +664,15 @@ app.post('/api/v1/risk-assessments/:id/approve', requireAuth, (req, res) => {
 // ==================== IMPACT ASSESSMENTS ====================
 
 app.get('/api/v1/impact-assessments', requireAuth, (req, res) => {
+  const { ai_asset_id } = req.query;
+  let where = 'WHERE ia.tenant_id = ?';
+  const params = [req.user.tenant_id];
+  if (ai_asset_id) { where += ' AND ia.ai_asset_id = ?'; params.push(ai_asset_id); }
   const results = db.prepare(
     `SELECT ia.*, a.name as asset_name, a.category, u.first_name || ' ' || u.last_name as assessor_name
      FROM impact_assessments ia JOIN ai_assets a ON ia.ai_asset_id = a.id JOIN users u ON ia.assessor_id = u.id
-     WHERE ia.tenant_id = ? ORDER BY ia.created_at DESC`
-  ).bind(req.user.tenant_id).all();
+     ${where} ORDER BY ia.created_at DESC`
+  ).bind(...params).all();
   res.json({ data: results.results });
 });
 
@@ -960,10 +996,11 @@ app.post('/api/v1/maturity-assessments', requireAuth, (req, res) => {
 // ==================== INCIDENTS ====================
 
 app.get('/api/v1/incidents', requireAuth, (req, res) => {
-  const { status, severity } = req.query;
+  const { status, severity, ai_asset_id } = req.query;
   let where = 'WHERE i.tenant_id = ?'; const params = [req.user.tenant_id];
   if (status) { where += ' AND i.status = ?'; params.push(status); }
   if (severity) { where += ' AND i.severity = ?'; params.push(severity); }
+  if (ai_asset_id) { where += ' AND i.ai_asset_id = ?'; params.push(ai_asset_id); }
   const results = db.prepare(
     `SELECT i.*, a.name as asset_name, a.category, u.first_name || ' ' || u.last_name as reporter_name
      FROM incidents i JOIN ai_assets a ON i.ai_asset_id = a.id JOIN users u ON i.reported_by = u.id
@@ -1023,6 +1060,170 @@ app.get('/api/v1/audit-log', requireAuth, (req, res) => {
      ${where} ORDER BY al.created_at DESC LIMIT ?`
   ).bind(...params, Math.min(+limit, 500)).all();
   res.json({ data: results.results });
+});
+
+// ==================== EVIDENCE MANAGEMENT ====================
+
+app.get('/api/v1/evidence', requireAuth, (req, res) => {
+  const { entity_type, entity_id } = req.query;
+  let where = 'WHERE e.tenant_id = ?';
+  const params = [req.user.tenant_id];
+  if (entity_type) { where += ' AND e.entity_type = ?'; params.push(entity_type); }
+  if (entity_id) { where += ' AND e.entity_id = ?'; params.push(entity_id); }
+  const results = db.prepare(
+    `SELECT e.*, u.first_name || ' ' || u.last_name as uploaded_by_name
+     FROM evidence e LEFT JOIN users u ON e.uploaded_by = u.id
+     ${where} ORDER BY e.created_at DESC`
+  ).bind(...params).all();
+  res.json({ data: results.results });
+});
+
+app.post('/api/v1/evidence', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin', 'governance_lead', 'reviewer'])) return res.status(403).json({ error: 'Insufficient permissions' });
+  const { entity_type, entity_id, title, description, evidence_type, url } = req.body;
+  if (!entity_type || !entity_id || !title) return res.status(400).json({ error: 'entity_type, entity_id, and title are required' });
+
+  const validEntityTypes = ['ai_asset', 'risk_assessment', 'impact_assessment', 'vendor_assessment', 'control_implementation'];
+  if (!validEntityTypes.includes(entity_type)) return res.status(400).json({ error: 'Invalid entity_type' });
+
+  const validEvidenceTypes = ['document', 'link', 'screenshot', 'test_result', 'policy', 'audit_report', 'certification', 'other'];
+  const evType = validEvidenceTypes.includes(evidence_type) ? evidence_type : 'other';
+
+  const id = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO evidence (id, tenant_id, entity_type, entity_id, title, description, evidence_type, url, uploaded_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, req.user.tenant_id, entity_type, entity_id, sanitizeString(title, 300),
+    description ? sanitizeString(description, 2000) : null, evType, url || null, req.user.user_id).run();
+
+  auditLog(req.user.tenant_id, req.user.user_id, 'create', 'evidence', id, { entity_type, entity_id, title });
+  const evidence = db.prepare('SELECT * FROM evidence WHERE id = ?').bind(id).first();
+  res.status(201).json({ data: evidence });
+});
+
+app.delete('/api/v1/evidence/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin', 'governance_lead'])) return res.status(403).json({ error: 'Insufficient permissions' });
+  const existing = db.prepare('SELECT * FROM evidence WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'Evidence not found' });
+  db.prepare('DELETE FROM evidence WHERE id = ?').bind(req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'delete', 'evidence', req.params.id, { title: existing.title });
+  res.json({ message: 'Evidence deleted' });
+});
+
+// ==================== EXPORT ====================
+
+function generateCSV(columns, rows) {
+  const header = columns.map(c => `"${c.label}"`).join(',');
+  const body = rows.map(row =>
+    columns.map(c => {
+      const val = row[c.key];
+      return `"${String(val ?? '').replace(/"/g, '""')}"`;
+    }).join(',')
+  ).join('\n');
+  return header + '\n' + body;
+}
+
+function sendCSV(res, filename, csv) {
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csv);
+}
+
+app.get('/api/v1/export/assets', requireAuth, (req, res) => {
+  const assets = db.prepare(
+    `SELECT a.*, u1.first_name || ' ' || u1.last_name as owner_name
+     FROM ai_assets a LEFT JOIN users u1 ON a.owner_user_id = u1.id
+     WHERE a.tenant_id = ? ORDER BY a.name`
+  ).bind(req.user.tenant_id).all();
+  const columns = [
+    { key: 'name', label: 'Name' }, { key: 'vendor', label: 'Vendor' }, { key: 'version', label: 'Version' },
+    { key: 'category', label: 'Category' }, { key: 'risk_tier', label: 'Risk Tier' },
+    { key: 'deployment_status', label: 'Status' }, { key: 'phi_access', label: 'PHI Access' },
+    { key: 'department', label: 'Department' }, { key: 'owner_name', label: 'Owner' },
+    { key: 'fda_classification', label: 'FDA Classification' }, { key: 'created_at', label: 'Created' },
+  ];
+  sendCSV(res, 'ai-assets.csv', generateCSV(columns, assets.results));
+});
+
+app.get('/api/v1/export/risk-assessments', requireAuth, (req, res) => {
+  const results = db.prepare(
+    `SELECT r.*, a.name as asset_name, u.first_name || ' ' || u.last_name as assessor_name
+     FROM risk_assessments r JOIN ai_assets a ON r.ai_asset_id = a.id JOIN users u ON r.assessor_id = u.id
+     WHERE r.tenant_id = ? ORDER BY r.created_at DESC`
+  ).bind(req.user.tenant_id).all();
+  const columns = [
+    { key: 'asset_name', label: 'AI System' }, { key: 'assessment_type', label: 'Type' },
+    { key: 'patient_safety_score', label: 'Patient Safety' }, { key: 'bias_fairness_score', label: 'Bias/Fairness' },
+    { key: 'data_privacy_score', label: 'Data Privacy' }, { key: 'clinical_validity_score', label: 'Clinical Validity' },
+    { key: 'cybersecurity_score', label: 'Cybersecurity' }, { key: 'regulatory_score', label: 'Regulatory' },
+    { key: 'overall_risk_level', label: 'Overall Risk' }, { key: 'status', label: 'Status' },
+    { key: 'assessor_name', label: 'Assessor' }, { key: 'created_at', label: 'Date' },
+  ];
+  sendCSV(res, 'risk-assessments.csv', generateCSV(columns, results.results));
+});
+
+app.get('/api/v1/export/compliance', requireAuth, (req, res) => {
+  const results = db.prepare(
+    `SELECT cc.control_id, cc.family, cc.title, cc.nist_ai_rmf_ref, cc.fda_samd_ref, cc.onc_hti1_ref, cc.hipaa_ref,
+      ci.implementation_status
+     FROM compliance_controls cc
+     LEFT JOIN control_implementations ci ON cc.id = ci.control_id AND ci.tenant_id = ?
+     ORDER BY cc.family, cc.control_id`
+  ).bind(req.user.tenant_id).all();
+  const columns = [
+    { key: 'control_id', label: 'Control ID' }, { key: 'family', label: 'Family' }, { key: 'title', label: 'Title' },
+    { key: 'implementation_status', label: 'Status' }, { key: 'nist_ai_rmf_ref', label: 'NIST AI RMF' },
+    { key: 'fda_samd_ref', label: 'FDA SaMD' }, { key: 'onc_hti1_ref', label: 'ONC HTI-1' }, { key: 'hipaa_ref', label: 'HIPAA' },
+  ];
+  sendCSV(res, 'compliance-status.csv', generateCSV(columns, results.results));
+});
+
+app.get('/api/v1/export/vendor-assessments', requireAuth, (req, res) => {
+  const results = db.prepare(
+    `SELECT va.*, u.first_name || ' ' || u.last_name as assessor_name FROM vendor_assessments va
+     LEFT JOIN users u ON va.assessed_by = u.id WHERE va.tenant_id = ? ORDER BY va.created_at DESC`
+  ).bind(req.user.tenant_id).all();
+  const columns = [
+    { key: 'vendor_name', label: 'Vendor' }, { key: 'product_name', label: 'Product' },
+    { key: 'transparency_score', label: 'Transparency' }, { key: 'bias_testing_score', label: 'Bias Testing' },
+    { key: 'security_score', label: 'Security' }, { key: 'data_practices_score', label: 'Data Practices' },
+    { key: 'contractual_score', label: 'Contractual' }, { key: 'overall_risk_score', label: 'Overall Score' },
+    { key: 'recommendation', label: 'Recommendation' }, { key: 'assessor_name', label: 'Assessor' },
+    { key: 'assessed_at', label: 'Date' },
+  ];
+  sendCSV(res, 'vendor-assessments.csv', generateCSV(columns, results.results));
+});
+
+app.get('/api/v1/export/incidents', requireAuth, (req, res) => {
+  const results = db.prepare(
+    `SELECT i.*, a.name as asset_name, u.first_name || ' ' || u.last_name as reporter_name
+     FROM incidents i JOIN ai_assets a ON i.ai_asset_id = a.id JOIN users u ON i.reported_by = u.id
+     WHERE i.tenant_id = ? ORDER BY i.created_at DESC`
+  ).bind(req.user.tenant_id).all();
+  const columns = [
+    { key: 'title', label: 'Title' }, { key: 'asset_name', label: 'AI System' },
+    { key: 'incident_type', label: 'Type' }, { key: 'severity', label: 'Severity' },
+    { key: 'patient_impact', label: 'Patient Impact' }, { key: 'status', label: 'Status' },
+    { key: 'root_cause', label: 'Root Cause' }, { key: 'corrective_actions', label: 'Corrective Actions' },
+    { key: 'reporter_name', label: 'Reporter' }, { key: 'created_at', label: 'Reported' },
+    { key: 'resolved_at', label: 'Resolved' },
+  ];
+  sendCSV(res, 'incidents.csv', generateCSV(columns, results.results));
+});
+
+app.get('/api/v1/export/evidence', requireAuth, (req, res) => {
+  const results = db.prepare(
+    `SELECT e.*, u.first_name || ' ' || u.last_name as uploaded_by_name
+     FROM evidence e LEFT JOIN users u ON e.uploaded_by = u.id
+     WHERE e.tenant_id = ? ORDER BY e.created_at DESC`
+  ).bind(req.user.tenant_id).all();
+  const columns = [
+    { key: 'title', label: 'Title' }, { key: 'evidence_type', label: 'Type' },
+    { key: 'entity_type', label: 'Entity Type' }, { key: 'entity_id', label: 'Entity ID' },
+    { key: 'description', label: 'Description' }, { key: 'url', label: 'URL' },
+    { key: 'uploaded_by_name', label: 'Uploaded By' }, { key: 'created_at', label: 'Date' },
+  ];
+  sendCSV(res, 'evidence.csv', generateCSV(columns, results.results));
 });
 
 // --- Catch-all: serve frontend for SPA routes ---
