@@ -1,0 +1,16 @@
+{
+  "name": "forgeai-govern",
+  "version": "1.0.0",
+  "description": "ForgeAI Govern™ - Healthcare AI Governance Platform",
+  "main": "src/api/worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute forgeai-govern-db --file=src/database/schema.sql",
+    "db:seed": "wrangler d1 execute forgeai-govern-db --file=src/database/seed.sql",
+    "test": "node tests/run.js"
+  },
+  "keywords": ["ai-governance", "healthcare", "compliance", "nist-ai-rmf", "hipaa"],
+  "author": "Forge Cyber Defense",
+  "license": "PROPRIETARY"
+}

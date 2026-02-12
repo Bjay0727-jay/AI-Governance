@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <title>ForgeAI Govern™ - Healthcare AI Governance Platform</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Login Screen -->
+        <div id="login-screen" class="screen active">
+            <div class="login-container">
+                <div class="login-header">
+                    <div class="logo">
+                        <span class="logo-icon">&#9741;</span>
+                        <h1>ForgeAI Govern<sup>™</sup></h1>
+                    </div>
+                    <p class="subtitle">Healthcare AI Governance Platform</p>
+                </div>
+                <form id="login-form" class="login-form">
+                    <div class="form-group">
+                        <label for="login-email">Email</label>
+                        <input type="email" id="login-email" required placeholder="admin@healthcare.org">
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" required placeholder="Min 12 characters">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+                    <div id="login-error" class="error-message hidden"></div>
+                </form>
+                <div class="login-footer">
+                    <button id="show-register" class="btn-link">Create New Organization Account</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Registration Screen -->
+        <div id="register-screen" class="screen">
+            <div class="login-container">
+                <div class="login-header">
+                    <div class="logo">
+                        <span class="logo-icon">&#9741;</span>
+                        <h1>ForgeAI Govern<sup>™</sup></h1>
+                    </div>
+                    <p class="subtitle">Register Your Organization</p>
+                </div>
+                <form id="register-form" class="login-form">
+                    <div class="form-group">
+                        <label for="reg-org">Organization Name</label>
+                        <input type="text" id="reg-org" required placeholder="Memorial Health System">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="reg-first">First Name</label>
+                            <input type="text" id="reg-first" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="reg-last">Last Name</label>
+                            <input type="text" id="reg-last" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-email">Email</label>
+                        <input type="email" id="reg-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password">Password</label>
+                        <input type="password" id="reg-password" required minlength="12" placeholder="Min 12 characters">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+                    <div id="register-error" class="error-message hidden"></div>
+                </form>
+                <div class="login-footer">
+                    <button id="show-login" class="btn-link">Back to Sign In</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Application -->
+        <div id="main-app" class="screen">
+            <!-- Top Navigation -->
+            <nav class="top-nav">
+                <div class="nav-left">
+                    <span class="logo-icon">&#9741;</span>
+                    <span class="nav-title">ForgeAI Govern<sup>™</sup></span>
+                </div>
+                <div class="nav-right">
+                    <span id="user-info" class="user-info"></span>
+                    <button id="logout-btn" class="btn btn-sm btn-outline">Sign Out</button>
+                </div>
+            </nav>
+
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <ul class="nav-menu">
+                    <li class="nav-item active" data-page="dashboard">
+                        <span class="nav-icon">&#9632;</span> Dashboard
+                    </li>
+                    <li class="nav-item" data-page="ai-assets">
+                        <span class="nav-icon">&#9881;</span> AI Asset Registry
+                    </li>
+                    <li class="nav-item" data-page="risk-assessments">
+                        <span class="nav-icon">&#9888;</span> Risk Assessments
+                    </li>
+                    <li class="nav-item" data-page="impact-assessments">
+                        <span class="nav-icon">&#9878;</span> Impact Assessments
+                    </li>
+                    <li class="nav-item" data-page="compliance">
+                        <span class="nav-icon">&#10004;</span> Compliance
+                    </li>
+                    <li class="nav-item" data-page="vendors">
+                        <span class="nav-icon">&#9733;</span> Vendor Assessments
+                    </li>
+                    <li class="nav-item" data-page="monitoring">
+                        <span class="nav-icon">&#9673;</span> Monitoring
+                    </li>
+                    <li class="nav-item" data-page="maturity">
+                        <span class="nav-icon">&#9670;</span> Maturity Assessment
+                    </li>
+                    <li class="nav-item" data-page="incidents">
+                        <span class="nav-icon">&#9888;</span> Incidents
+                    </li>
+                </ul>
+                <div class="sidebar-footer">
+                    <div class="compliance-badge">
+                        <span>NIST AI RMF</span>
+                        <span>HIPAA</span>
+                        <span>FDA SaMD</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <main class="content" id="content-area">
+                <!-- Pages rendered dynamically -->
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal Template -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal" id="modal-container">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer" id="modal-footer"></div>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/pages.js"></script>
+</body>
+</html>
