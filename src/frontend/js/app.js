@@ -47,6 +47,13 @@ const App = {
     this.showScreen('main-app');
     document.getElementById('user-info').textContent =
       `${API.user?.first_name} ${API.user?.last_name} | ${API.tenant?.name}`;
+
+    // Show/hide admin-only nav items
+    const isAdmin = API.user?.role === 'admin';
+    document.querySelectorAll('.admin-only').forEach(el => {
+      el.style.display = isAdmin ? '' : 'none';
+    });
+
     this.navigate('dashboard');
   },
 
@@ -118,6 +125,8 @@ const App = {
         case 'monitoring': content.innerHTML = await Pages.monitoring(); break;
         case 'maturity': content.innerHTML = await Pages.maturity(); break;
         case 'incidents': content.innerHTML = await Pages.incidents(); break;
+        case 'users': content.innerHTML = await Pages.users(); break;
+        case 'audit-log': content.innerHTML = await Pages.auditLog(); break;
         default: content.innerHTML = '<div class="empty-state"><p>Page not found</p></div>';
       }
       // Bind page-specific events after rendering

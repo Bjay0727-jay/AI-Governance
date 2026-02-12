@@ -12,10 +12,14 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
 const { createDatabase } = require('./src/local/db-adapter');
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'forgeai-local-dev-secret-' + crypto.randomBytes(8).toString('hex');
+const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString('hex');
 
 // --- Initialize Database ---
 const db = createDatabase();
@@ -26,14 +30,22 @@ try {
 } catch {
   console.log('First run detected — initializing database...');
   const schema = fs.readFileSync(path.join(__dirname, 'src', 'database', 'schema.sql'), 'utf8');
-  const statements = schema.split(';').map(s => s.trim()).filter(s => s && !s.startsWith('--') && !s.startsWith('PRAGMA'));
-  for (const stmt of statements) {
-    try { db.exec(stmt + ';'); } catch (e) { /* skip pragma/duplicate errors */ }
+  // Use the underlying SQLite db.exec which supports multi-statement SQL
+  if (db.db && typeof db.db.exec === 'function') {
+    db.db.exec(schema);
+  } else {
+    db.exec(schema);
   }
 
   // Seed compliance controls
   const seed = fs.readFileSync(path.join(__dirname, 'src', 'database', 'seed.sql'), 'utf8');
-  try { db.exec(seed); } catch (e) { /* skip if already seeded */ }
+  try {
+    if (db.db && typeof db.db.exec === 'function') {
+      db.db.exec(seed);
+    } else {
+      db.exec(seed);
+    }
+  } catch (e) { /* skip if already seeded */ }
   console.log('Database initialized with schema and compliance controls.\n');
 }
 
@@ -44,12 +56,47 @@ const env = {
   ENVIRONMENT: 'local',
 };
 
-// --- Import Handlers (adapted for CommonJS) ---
-// Since the handler files use ES module syntax, we'll create wrapper functions
-
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+
+// --- Security Middleware ---
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || true,
+  credentials: true,
+}));
+
+app.use(cookieParser());
+app.use(express.json({ limit: '1mb' }));
+
+// Global rate limiter: 200 requests per minute per IP
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api/', globalLimiter);
+
+// Auth rate limiter: 10 attempts per 15 minutes per IP
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts, please try again later' },
+});
 
 // Serve static frontend
 app.use(express.static(path.join(__dirname, 'src', 'frontend')));
@@ -119,6 +166,22 @@ function auditLog(tenantId, userId, action, entityType, entityId, details = {}) 
   ).bind(crypto.randomUUID(), tenantId, userId, action, entityType, entityId, JSON.stringify(details), 'local').run();
 }
 
+// --- Input Validation Helpers ---
+function sanitizeString(str, maxLength = 500) {
+  if (typeof str !== 'string') return str;
+  return str.trim().slice(0, maxLength);
+}
+
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+
+function validateScore(score, min = 1, max = 5) {
+  const n = parseInt(score);
+  return !isNaN(n) && n >= min && n <= max ? n : null;
+}
+
 // --- Auth Middleware ---
 function requireAuth(req, res, next) {
   const user = authenticate(req);
@@ -132,25 +195,35 @@ app.get('/api/v1/health', (req, res) => {
   res.json({ status: 'healthy', version: '1.0.0', mode: 'local', timestamp: new Date().toISOString() });
 });
 
+// --- CSRF Token Endpoint ---
+app.get('/api/v1/csrf-token', (req, res) => {
+  const token = crypto.createHmac('sha256', CSRF_SECRET)
+    .update(crypto.randomBytes(16).toString('hex'))
+    .digest('hex');
+  res.json({ csrf_token: token });
+});
+
 // ==================== AUTH ROUTES ====================
 
-app.post('/api/v1/auth/register', async (req, res) => {
+app.post('/api/v1/auth/register', authLimiter, async (req, res) => {
   try {
     const { organization_name, email, password, first_name, last_name } = req.body;
     if (!organization_name || !email || !password || !first_name || !last_name) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    if (!validateEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
     if (password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    if (password.length > 128) return res.status(400).json({ error: 'Password must be at most 128 characters' });
 
     const tenantId = crypto.randomUUID();
     const userId = crypto.randomUUID();
-    const slug = organization_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
+    const slug = sanitizeString(organization_name).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50);
     const passwordHash = await hashPassword(password);
 
     db.prepare(`INSERT INTO tenants (id, name, slug, plan, status) VALUES (?, ?, ?, 'trial', 'active')`)
-      .bind(tenantId, organization_name, slug).run();
+      .bind(tenantId, sanitizeString(organization_name, 200), slug).run();
     db.prepare(`INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, role, status) VALUES (?, ?, ?, ?, ?, ?, 'admin', 'active')`)
-      .bind(userId, tenantId, email, passwordHash, first_name, last_name).run();
+      .bind(userId, tenantId, sanitizeString(email, 254), passwordHash, sanitizeString(first_name, 100), sanitizeString(last_name, 100)).run();
 
     const accessToken = createToken({ user_id: userId, tenant_id: tenantId, role: 'admin' }, ACCESS_TOKEN_EXPIRY);
     const refreshToken = createToken({ user_id: userId, tenant_id: tenantId, type: 'refresh' }, REFRESH_TOKEN_EXPIRY);
@@ -168,13 +241,13 @@ app.post('/api/v1/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/v1/auth/login', async (req, res) => {
+app.post('/api/v1/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
     const user = db.prepare(
-      `SELECT u.*, t.name as tenant_name, t.slug as tenant_slug FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.email = ? AND u.status = 'active'`
+      `SELECT u.*, t.name as tenant_name, t.slug as tenant_slug FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.email = ? AND u.status != 'deactivated'`
     ).bind(email).first();
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
@@ -227,6 +300,128 @@ app.post('/api/v1/auth/refresh', (req, res) => {
   res.json({ access_token: newAccess, refresh_token: newRefresh, token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
 });
 
+// ==================== USER MANAGEMENT ====================
+
+app.get('/api/v1/users', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const users = db.prepare(
+    `SELECT id, email, first_name, last_name, role, mfa_enabled, status, last_login, created_at
+     FROM users WHERE tenant_id = ? ORDER BY created_at DESC`
+  ).bind(req.user.tenant_id).all();
+  res.json({ data: users.results });
+});
+
+app.get('/api/v1/users/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const user = db.prepare(
+    `SELECT id, email, first_name, last_name, role, mfa_enabled, status, last_login, failed_login_attempts, locked_until, created_at, updated_at
+     FROM users WHERE id = ? AND tenant_id = ?`
+  ).bind(req.params.id, req.user.tenant_id).first();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ data: user });
+});
+
+app.post('/api/v1/users', requireAuth, async (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const { email, password, first_name, last_name, role } = req.body;
+  if (!email || !password || !first_name || !last_name) {
+    return res.status(400).json({ error: 'email, password, first_name, and last_name are required' });
+  }
+  if (!validateEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
+  if (password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
+  const validRoles = ['admin', 'governance_lead', 'reviewer', 'viewer'];
+  const userRole = validRoles.includes(role) ? role : 'viewer';
+
+  try {
+    const id = crypto.randomUUID();
+    const passwordHash = await hashPassword(password);
+    db.prepare(
+      `INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, role, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`
+    ).bind(id, req.user.tenant_id, sanitizeString(email, 254), passwordHash,
+      sanitizeString(first_name, 100), sanitizeString(last_name, 100), userRole).run();
+    auditLog(req.user.tenant_id, req.user.user_id, 'create', 'user', id, { email, role: userRole });
+    res.status(201).json({
+      data: { id, email, first_name, last_name, role: userRole, status: 'active' },
+      message: 'User created successfully',
+    });
+  } catch (err) {
+    if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Email already exists in this organization' });
+    console.error('Create user error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/v1/users/:id', requireAuth, async (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const existing = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+
+  const updates = []; const values = [];
+  if (req.body.first_name !== undefined) { updates.push('first_name = ?'); values.push(sanitizeString(req.body.first_name, 100)); }
+  if (req.body.last_name !== undefined) { updates.push('last_name = ?'); values.push(sanitizeString(req.body.last_name, 100)); }
+  if (req.body.role !== undefined) {
+    const validRoles = ['admin', 'governance_lead', 'reviewer', 'viewer'];
+    if (validRoles.includes(req.body.role)) { updates.push('role = ?'); values.push(req.body.role); }
+  }
+  if (req.body.status !== undefined) {
+    const validStatuses = ['active', 'deactivated'];
+    if (validStatuses.includes(req.body.status)) { updates.push('status = ?'); values.push(req.body.status); }
+  }
+  if (req.body.password) {
+    if (req.body.password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
+    const passwordHash = await hashPassword(req.body.password);
+    updates.push('password_hash = ?'); values.push(passwordHash);
+    updates.push('failed_login_attempts = 0');
+    updates.push('locked_until = NULL');
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+  updates.push("updated_at = datetime('now')");
+
+  db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`)
+    .bind(...values, req.params.id, req.user.tenant_id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'user', req.params.id, { fields: Object.keys(req.body) });
+
+  const updated = db.prepare(
+    `SELECT id, email, first_name, last_name, role, mfa_enabled, status, last_login, created_at, updated_at
+     FROM users WHERE id = ?`
+  ).bind(req.params.id).first();
+  res.json({ data: updated });
+});
+
+app.delete('/api/v1/users/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  if (req.params.id === req.user.user_id) return res.status(400).json({ error: 'Cannot deactivate your own account' });
+  const existing = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+  db.prepare(`UPDATE users SET status = 'deactivated', updated_at = datetime('now') WHERE id = ?`).bind(req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'deactivate', 'user', req.params.id, {});
+  res.json({ message: 'User deactivated' });
+});
+
+app.post('/api/v1/users/:id/unlock', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const existing = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+  db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL, status = 'active', updated_at = datetime('now') WHERE id = ?`)
+    .bind(req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'unlock', 'user', req.params.id, {});
+  res.json({ message: 'User account unlocked' });
+});
+
+app.post('/api/v1/users/:id/reset-password', requireAuth, async (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const { new_password } = req.body;
+  if (!new_password || new_password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
+  const existing = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+  const passwordHash = await hashPassword(new_password);
+  db.prepare(`UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, updated_at = datetime('now') WHERE id = ?`)
+    .bind(passwordHash, req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'reset_password', 'user', req.params.id, {});
+  res.json({ message: 'Password reset successfully' });
+});
+
 // ==================== AI ASSETS ====================
 
 app.get('/api/v1/ai-assets', requireAuth, (req, res) => {
@@ -276,7 +471,8 @@ app.post('/api/v1/ai-assets', requireAuth, (req, res) => {
       data_sources, phi_access, phi_data_types, deployment_status, owner_user_id, clinical_champion_id,
       department, description, intended_use, known_limitations, training_data_description)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, req.user.tenant_id, name, b.vendor || null, b.version || null, category,
+  ).bind(id, req.user.tenant_id, sanitizeString(name, 200), b.vendor ? sanitizeString(b.vendor, 200) : null,
+    b.version || null, category,
     b.risk_tier || 'moderate', b.fda_classification || null, JSON.stringify(b.data_sources || []),
     b.phi_access ? 1 : 0, JSON.stringify(b.phi_data_types || []), b.deployment_status || 'proposed',
     b.owner_user_id || null, b.clinical_champion_id || null, b.department || null,
@@ -339,6 +535,17 @@ app.get('/api/v1/risk-assessments', requireAuth, (req, res) => {
   res.json({ data: results.results });
 });
 
+app.get('/api/v1/risk-assessments/:id', requireAuth, (req, res) => {
+  const assessment = db.prepare(
+    `SELECT r.*, a.name as asset_name, a.category as asset_category, a.risk_tier,
+      u.first_name || ' ' || u.last_name as assessor_name
+     FROM risk_assessments r JOIN ai_assets a ON r.ai_asset_id = a.id JOIN users u ON r.assessor_id = u.id
+     WHERE r.id = ? AND r.tenant_id = ?`
+  ).bind(req.params.id, req.user.tenant_id).first();
+  if (!assessment) return res.status(404).json({ error: 'Risk assessment not found' });
+  res.json({ data: assessment });
+});
+
 app.post('/api/v1/risk-assessments', requireAuth, (req, res) => {
   if (!authorize(req.user, ['admin', 'governance_lead', 'reviewer'])) return res.status(403).json({ error: 'Insufficient permissions' });
   const { ai_asset_id, assessment_type } = req.body;
@@ -358,12 +565,12 @@ app.post('/api/v1/risk-assessments', requireAuth, (req, res) => {
   db.prepare(
     `INSERT INTO risk_assessments (id, tenant_id, ai_asset_id, assessment_type, assessor_id,
       patient_safety_score, bias_fairness_score, data_privacy_score, clinical_validity_score,
-      cybersecurity_score, regulatory_score, overall_risk_level, findings, recommendations, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
+      cybersecurity_score, regulatory_score, overall_risk_level, findings, recommendations, mitigation_plan, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`
   ).bind(id, req.user.tenant_id, ai_asset_id, assessment_type, req.user.user_id,
     scores.patient_safety_score || null, scores.bias_fairness_score || null, scores.data_privacy_score || null,
     scores.clinical_validity_score || null, scores.cybersecurity_score || null, scores.regulatory_score || null,
-    overallRisk, JSON.stringify(b.findings || {}), b.recommendations || null
+    overallRisk, JSON.stringify(b.findings || {}), b.recommendations || null, b.mitigation_plan || null
   ).run();
 
   auditLog(req.user.tenant_id, req.user.user_id, 'create', 'risk_assessment', id, { overall_risk_level: overallRisk });
@@ -371,13 +578,54 @@ app.post('/api/v1/risk-assessments', requireAuth, (req, res) => {
   res.status(201).json({ data: assessment });
 });
 
+app.put('/api/v1/risk-assessments/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin', 'governance_lead', 'reviewer'])) return res.status(403).json({ error: 'Insufficient permissions' });
+  const existing = db.prepare('SELECT * FROM risk_assessments WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'Risk assessment not found' });
+  if (existing.status === 'approved') return res.status(400).json({ error: 'Cannot edit an approved assessment' });
+
+  const updates = []; const values = [];
+  const scoreFields = ['patient_safety_score', 'bias_fairness_score', 'data_privacy_score', 'clinical_validity_score', 'cybersecurity_score', 'regulatory_score'];
+  const textFields = ['assessment_type', 'recommendations', 'mitigation_plan', 'status'];
+
+  for (const f of scoreFields) {
+    if (req.body[f] !== undefined) {
+      const v = validateScore(req.body[f]);
+      if (v !== null) { updates.push(`${f} = ?`); values.push(v); }
+    }
+  }
+  for (const f of textFields) {
+    if (req.body[f] !== undefined) { updates.push(`${f} = ?`); values.push(req.body[f]); }
+  }
+  if (req.body.findings !== undefined) { updates.push('findings = ?'); values.push(JSON.stringify(req.body.findings)); }
+
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+  // Recalculate overall risk if scores changed
+  const merged = { ...existing };
+  for (const f of scoreFields) { if (req.body[f] !== undefined) merged[f] = validateScore(req.body[f]) || merged[f]; }
+  const allScored = scoreFields.every(f => merged[f] >= 1 && merged[f] <= 5);
+  if (allScored) {
+    const overallRisk = calculateOverallRisk(merged);
+    updates.push('overall_risk_level = ?'); values.push(overallRisk);
+  }
+  updates.push("updated_at = datetime('now')");
+
+  db.prepare(`UPDATE risk_assessments SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`)
+    .bind(...values, req.params.id, req.user.tenant_id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'risk_assessment', req.params.id, {});
+  const updated = db.prepare('SELECT * FROM risk_assessments WHERE id = ?').bind(req.params.id).first();
+  res.json({ data: updated });
+});
+
 app.post('/api/v1/risk-assessments/:id/approve', requireAuth, (req, res) => {
   if (!authorize(req.user, ['admin', 'governance_lead'])) return res.status(403).json({ error: 'Insufficient permissions' });
   const existing = db.prepare('SELECT * FROM risk_assessments WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const newStatus = req.body.approved ? 'approved' : 'rejected';
-  db.prepare(`UPDATE risk_assessments SET status = ?, approved_by = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
-    .bind(newStatus, req.user.user_id, req.params.id).run();
+  db.prepare(`UPDATE risk_assessments SET status = ?, approved_by = ?, review_notes = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
+    .bind(newStatus, req.user.user_id, req.body.review_notes || null, req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, newStatus === 'approved' ? 'approve' : 'reject', 'risk_assessment', req.params.id, {});
   res.json({ message: `Assessment ${newStatus}` });
 });
 
@@ -390,6 +638,16 @@ app.get('/api/v1/impact-assessments', requireAuth, (req, res) => {
      WHERE ia.tenant_id = ? ORDER BY ia.created_at DESC`
   ).bind(req.user.tenant_id).all();
   res.json({ data: results.results });
+});
+
+app.get('/api/v1/impact-assessments/:id', requireAuth, (req, res) => {
+  const assessment = db.prepare(
+    `SELECT ia.*, a.name as asset_name, a.category, u.first_name || ' ' || u.last_name as assessor_name
+     FROM impact_assessments ia JOIN ai_assets a ON ia.ai_asset_id = a.id JOIN users u ON ia.assessor_id = u.id
+     WHERE ia.id = ? AND ia.tenant_id = ?`
+  ).bind(req.params.id, req.user.tenant_id).first();
+  if (!assessment) return res.status(404).json({ error: 'Impact assessment not found' });
+  res.json({ data: assessment });
 });
 
 app.post('/api/v1/impact-assessments', requireAuth, (req, res) => {
@@ -408,8 +666,38 @@ app.post('/api/v1/impact-assessments', requireAuth, (req, res) => {
     b.remediation_required ? 1 : 0, b.remediation_plan || null, b.remediation_required ? 'planned' : 'not_needed',
     b.status || 'in_progress'
   ).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'create', 'impact_assessment', id, {});
   const aia = db.prepare('SELECT * FROM impact_assessments WHERE id = ?').bind(id).first();
   res.status(201).json({ data: aia });
+});
+
+app.put('/api/v1/impact-assessments/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin', 'governance_lead', 'reviewer'])) return res.status(403).json({ error: 'Insufficient permissions' });
+  const existing = db.prepare('SELECT * FROM impact_assessments WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'Impact assessment not found' });
+
+  const updates = []; const values = [];
+  const textFields = ['assessment_period', 'remediation_plan', 'remediation_status', 'status'];
+  for (const f of textFields) {
+    if (req.body[f] !== undefined) { updates.push(`${f} = ?`); values.push(req.body[f]); }
+  }
+  const jsonFields = ['demographic_groups_tested', 'performance_by_group', 'bias_indicators', 'drift_details', 'clinical_outcomes'];
+  for (const f of jsonFields) {
+    if (req.body[f] !== undefined) { updates.push(`${f} = ?`); values.push(JSON.stringify(req.body[f])); }
+  }
+  if (req.body.drift_detected !== undefined) { updates.push('drift_detected = ?'); values.push(req.body.drift_detected ? 1 : 0); }
+  if (req.body.remediation_required !== undefined) { updates.push('remediation_required = ?'); values.push(req.body.remediation_required ? 1 : 0); }
+  if (req.body.disparate_impact_ratio !== undefined) { updates.push('disparate_impact_ratio = ?'); values.push(req.body.disparate_impact_ratio); }
+  if (req.body.status === 'completed') { updates.push("completed_at = datetime('now')"); }
+
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+  updates.push("updated_at = datetime('now')");
+
+  db.prepare(`UPDATE impact_assessments SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`)
+    .bind(...values, req.params.id, req.user.tenant_id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'impact_assessment', req.params.id, {});
+  const updated = db.prepare('SELECT * FROM impact_assessments WHERE id = ?').bind(req.params.id).first();
+  res.json({ data: updated });
 });
 
 // ==================== COMPLIANCE ====================
@@ -467,6 +755,15 @@ app.get('/api/v1/vendor-assessments', requireAuth, (req, res) => {
   res.json({ data: results.results });
 });
 
+app.get('/api/v1/vendor-assessments/:id', requireAuth, (req, res) => {
+  const va = db.prepare(
+    `SELECT va.*, u.first_name || ' ' || u.last_name as assessor_name FROM vendor_assessments va
+     LEFT JOIN users u ON va.assessed_by = u.id WHERE va.id = ? AND va.tenant_id = ?`
+  ).bind(req.params.id, req.user.tenant_id).first();
+  if (!va) return res.status(404).json({ error: 'Vendor assessment not found' });
+  res.json({ data: va });
+});
+
 app.post('/api/v1/vendor-assessments', requireAuth, (req, res) => {
   if (!authorize(req.user, ['admin', 'governance_lead', 'reviewer'])) return res.status(403).json({ error: 'Insufficient permissions' });
   const { vendor_name, product_name } = req.body;
@@ -477,13 +774,44 @@ app.post('/api/v1/vendor-assessments', requireAuth, (req, res) => {
       validation_methodology, transparency_score, bias_testing_score, security_score, data_practices_score,
       contractual_score, recommendation, assessed_by, assessed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-  ).bind(id, req.user.tenant_id, vendor_name, product_name, b.training_data_provenance || null,
-    b.validation_methodology || null, b.transparency_score || null, b.bias_testing_score || null,
+  ).bind(id, req.user.tenant_id, sanitizeString(vendor_name, 200), sanitizeString(product_name, 200),
+    b.training_data_provenance || null, b.validation_methodology || null,
+    b.transparency_score || null, b.bias_testing_score || null,
     b.security_score || null, b.data_practices_score || null, b.contractual_score || null,
     b.recommendation || 'pending', req.user.user_id
   ).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'create', 'vendor_assessment', id, { vendor_name, product_name });
   const va = db.prepare('SELECT * FROM vendor_assessments WHERE id = ?').bind(id).first();
   res.status(201).json({ data: va });
+});
+
+app.put('/api/v1/vendor-assessments/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin', 'governance_lead', 'reviewer'])) return res.status(403).json({ error: 'Insufficient permissions' });
+  const existing = db.prepare('SELECT * FROM vendor_assessments WHERE id = ? AND tenant_id = ?').bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'Vendor assessment not found' });
+
+  const updates = []; const values = [];
+  const textFields = ['vendor_name', 'product_name', 'training_data_provenance', 'validation_methodology', 'recommendation', 'conditions'];
+  for (const f of textFields) {
+    if (req.body[f] !== undefined) { updates.push(`${f} = ?`); values.push(req.body[f]); }
+  }
+  const scoreFields = ['transparency_score', 'bias_testing_score', 'security_score', 'data_practices_score', 'contractual_score'];
+  for (const f of scoreFields) {
+    if (req.body[f] !== undefined) {
+      const v = validateScore(req.body[f]);
+      if (v !== null) { updates.push(`${f} = ?`); values.push(v); }
+    }
+  }
+  if (req.body.next_reassessment !== undefined) { updates.push('next_reassessment = ?'); values.push(req.body.next_reassessment); }
+
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+  updates.push("updated_at = datetime('now')");
+
+  db.prepare(`UPDATE vendor_assessments SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`)
+    .bind(...values, req.params.id, req.user.tenant_id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'vendor_assessment', req.params.id, {});
+  const updated = db.prepare('SELECT * FROM vendor_assessments WHERE id = ?').bind(req.params.id).first();
+  res.json({ data: updated });
 });
 
 app.post('/api/v1/vendor-assessments/:id/score', requireAuth, (req, res) => {
@@ -653,7 +981,8 @@ app.post('/api/v1/incidents', requireAuth, (req, res) => {
   db.prepare(
     `INSERT INTO incidents (id, tenant_id, ai_asset_id, reported_by, incident_type, severity, title, description, patient_impact, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`
-  ).bind(id, req.user.tenant_id, ai_asset_id, req.user.user_id, incident_type, severity, title, description, req.body.patient_impact ? 1 : 0).run();
+  ).bind(id, req.user.tenant_id, ai_asset_id, req.user.user_id, incident_type, severity,
+    sanitizeString(title, 300), sanitizeString(description, 5000), req.body.patient_impact ? 1 : 0).run();
   if (severity === 'critical' && incident_type === 'patient_safety') {
     db.prepare(`UPDATE ai_assets SET deployment_status = 'suspended', updated_at = datetime('now') WHERE id = ?`).bind(ai_asset_id).run();
   }
@@ -674,8 +1003,26 @@ app.put('/api/v1/incidents/:id', requireAuth, (req, res) => {
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   updates.push("updated_at = datetime('now')");
   db.prepare(`UPDATE incidents SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`).bind(...values, req.params.id, req.user.tenant_id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'incident', req.params.id, {});
   const updated = db.prepare('SELECT * FROM incidents WHERE id = ?').bind(req.params.id).first();
   res.json({ data: updated });
+});
+
+// ==================== AUDIT LOG ====================
+
+app.get('/api/v1/audit-log', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const { entity_type, user_id, action, limit = 100 } = req.query;
+  let where = 'WHERE al.tenant_id = ?'; const params = [req.user.tenant_id];
+  if (entity_type) { where += ' AND al.entity_type = ?'; params.push(entity_type); }
+  if (user_id) { where += ' AND al.user_id = ?'; params.push(user_id); }
+  if (action) { where += ' AND al.action = ?'; params.push(action); }
+  const results = db.prepare(
+    `SELECT al.*, u.first_name || ' ' || u.last_name as user_name, u.email as user_email
+     FROM audit_log al LEFT JOIN users u ON al.user_id = u.id
+     ${where} ORDER BY al.created_at DESC LIMIT ?`
+  ).bind(...params, Math.min(+limit, 500)).all();
+  res.json({ data: results.results });
 });
 
 // --- Catch-all: serve frontend for SPA routes ---
@@ -683,9 +1030,13 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'src', 'frontend', 'index.html'));
 });
 
-// --- Start Server ---
-app.listen(PORT, () => {
-  console.log(`
+// --- Export for testing ---
+module.exports = { app, db, createToken, hashPassword, verifyPassword, JWT_SECRET };
+
+// --- Start Server (only when run directly) ---
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`
   ╔══════════════════════════════════════════════════════╗
   ║   ForgeAI Govern™ - Healthcare AI Governance        ║
   ║   Platform running at http://localhost:${PORT}          ║
@@ -693,9 +1044,10 @@ app.listen(PORT, () => {
   ║   API:       http://localhost:${PORT}/api/v1/health     ║
   ║   Dashboard: http://localhost:${PORT}                   ║
   ╚══════════════════════════════════════════════════════╝
-  `);
-});
+    `);
+  });
 
-// Graceful shutdown
-process.on('SIGINT', () => { db.close(); process.exit(0); });
-process.on('SIGTERM', () => { db.close(); process.exit(0); });
+  // Graceful shutdown
+  process.on('SIGINT', () => { db.close(); process.exit(0); });
+  process.on('SIGTERM', () => { db.close(); process.exit(0); });
+}

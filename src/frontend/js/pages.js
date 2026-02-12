@@ -446,6 +446,9 @@ const Pages = {
       case 'impact-assessments':
         document.getElementById('btn-add-aia')?.addEventListener('click', () => this.showImpactForm());
         break;
+      case 'users':
+        document.getElementById('btn-add-user')?.addEventListener('click', () => this.showUserForm());
+        break;
     }
   },
 
@@ -693,5 +696,238 @@ const Pages = {
         App.navigate('impact-assessments');
       } catch (err) { App.toast(err.message, 'error'); }
     });
+  },
+
+  // ==================== USER MANAGEMENT ====================
+  async users() {
+    let data = { data: [] };
+    try { data = await API.getUsers(); } catch (e) { /* empty */ }
+
+    const roleLabels = { admin: 'Admin', governance_lead: 'Governance Lead', reviewer: 'Reviewer', viewer: 'Viewer' };
+
+    return `
+      <div class="page-header">
+        <div><h2>User Management</h2><p>Manage team members, roles, and access for ${API.tenant?.name || 'your organization'}</p></div>
+        <button class="btn btn-primary" id="btn-add-user">+ Add User</button>
+      </div>
+      <div class="card">
+        <div class="table-container">
+          <table>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${data.data.length > 0 ? data.data.map(u => `
+                <tr>
+                  <td><strong>${u.first_name} ${u.last_name}</strong></td>
+                  <td>${u.email}</td>
+                  <td>${App.badge(u.role === 'governance_lead' ? 'info' : u.role === 'admin' ? 'critical' : u.role === 'reviewer' ? 'moderate' : 'low')}
+                      <span style="margin-left:4px">${roleLabels[u.role] || u.role}</span></td>
+                  <td>${App.badge(u.status === 'active' ? 'approved' : u.status === 'locked' ? 'critical' : 'draft')}</td>
+                  <td>${u.last_login ? App.formatDate(u.last_login) : 'Never'}</td>
+                  <td>
+                    <div class="btn-group">
+                      <button class="btn btn-sm btn-outline" onclick="Pages.showEditUserForm('${u.id}')">Edit</button>
+                      ${u.status === 'locked' ? `<button class="btn btn-sm btn-warning" onclick="Pages.unlockUser('${u.id}')">Unlock</button>` : ''}
+                      ${u.id !== API.user?.id ? `<button class="btn btn-sm btn-outline" onclick="Pages.showResetPasswordForm('${u.id}')">Reset PW</button>` : ''}
+                    </div>
+                  </td>
+                </tr>
+              `).join('') : '<tr><td colspan="6" class="empty-state">No users found</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  },
+
+  showUserForm() {
+    App.openModal('Add New User', `
+      <form id="user-form">
+        <div class="form-row">
+          <div class="form-group"><label>First Name *</label><input type="text" id="uf-first" required></div>
+          <div class="form-group"><label>Last Name *</label><input type="text" id="uf-last" required></div>
+        </div>
+        <div class="form-group"><label>Email *</label><input type="email" id="uf-email" required></div>
+        <div class="form-group"><label>Password *</label><input type="password" id="uf-password" required minlength="12" placeholder="Min 12 characters"></div>
+        <div class="form-group"><label>Role *</label>
+          <select id="uf-role">
+            <option value="viewer">Viewer - Read-only access</option>
+            <option value="reviewer">Reviewer - Can create assessments</option>
+            <option value="governance_lead">Governance Lead - Can approve/reject</option>
+            <option value="admin">Admin - Full access</option>
+          </select>
+        </div>
+      </form>
+    `, '<button class="btn btn-primary" id="uf-submit">Create User</button>');
+    document.getElementById('uf-submit').addEventListener('click', async () => {
+      try {
+        await API.createUser({
+          first_name: document.getElementById('uf-first').value,
+          last_name: document.getElementById('uf-last').value,
+          email: document.getElementById('uf-email').value,
+          password: document.getElementById('uf-password').value,
+          role: document.getElementById('uf-role').value,
+        });
+        App.closeModal();
+        App.toast('User created successfully', 'success');
+        App.navigate('users');
+      } catch (err) { App.toast(err.message, 'error'); }
+    });
+  },
+
+  async showEditUserForm(userId) {
+    try {
+      const { data: u } = await API.getUser(userId);
+      App.openModal(`Edit User: ${u.first_name} ${u.last_name}`, `
+        <form id="edit-user-form">
+          <div class="form-row">
+            <div class="form-group"><label>First Name</label><input type="text" id="eu-first" value="${u.first_name}"></div>
+            <div class="form-group"><label>Last Name</label><input type="text" id="eu-last" value="${u.last_name}"></div>
+          </div>
+          <div class="form-group"><label>Email</label><input type="email" id="eu-email" value="${u.email}" disabled></div>
+          <div class="form-group"><label>Role</label>
+            <select id="eu-role">
+              <option value="viewer" ${u.role==='viewer'?'selected':''}>Viewer</option>
+              <option value="reviewer" ${u.role==='reviewer'?'selected':''}>Reviewer</option>
+              <option value="governance_lead" ${u.role==='governance_lead'?'selected':''}>Governance Lead</option>
+              <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Status</label>
+            <select id="eu-status">
+              <option value="active" ${u.status==='active'?'selected':''}>Active</option>
+              <option value="deactivated" ${u.status==='deactivated'?'selected':''}>Deactivated</option>
+            </select>
+          </div>
+        </form>
+      `, `<button class="btn btn-primary" id="eu-submit">Save Changes</button>
+          ${u.id !== API.user?.id ? `<button class="btn btn-danger" id="eu-deactivate">Deactivate</button>` : ''}`);
+      document.getElementById('eu-submit').addEventListener('click', async () => {
+        try {
+          await API.updateUser(userId, {
+            first_name: document.getElementById('eu-first').value,
+            last_name: document.getElementById('eu-last').value,
+            role: document.getElementById('eu-role').value,
+            status: document.getElementById('eu-status').value,
+          });
+          App.closeModal();
+          App.toast('User updated', 'success');
+          App.navigate('users');
+        } catch (err) { App.toast(err.message, 'error'); }
+      });
+      document.getElementById('eu-deactivate')?.addEventListener('click', async () => {
+        if (confirm('Deactivate this user? They will no longer be able to sign in.')) {
+          try {
+            await API.deactivateUser(userId);
+            App.closeModal();
+            App.toast('User deactivated', 'success');
+            App.navigate('users');
+          } catch (err) { App.toast(err.message, 'error'); }
+        }
+      });
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  async unlockUser(userId) {
+    try {
+      await API.unlockUser(userId);
+      App.toast('User account unlocked', 'success');
+      App.navigate('users');
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  showResetPasswordForm(userId) {
+    App.openModal('Reset User Password', `
+      <form id="reset-pw-form">
+        <div class="form-group"><label>New Password *</label><input type="password" id="rp-password" required minlength="12" placeholder="Min 12 characters"></div>
+        <div class="form-group"><label>Confirm Password *</label><input type="password" id="rp-confirm" required minlength="12"></div>
+      </form>
+    `, '<button class="btn btn-primary" id="rp-submit">Reset Password</button>');
+    document.getElementById('rp-submit').addEventListener('click', async () => {
+      const pw = document.getElementById('rp-password').value;
+      const confirm = document.getElementById('rp-confirm').value;
+      if (pw !== confirm) { App.toast('Passwords do not match', 'error'); return; }
+      try {
+        await API.resetUserPassword(userId, { new_password: pw });
+        App.closeModal();
+        App.toast('Password reset successfully', 'success');
+      } catch (err) { App.toast(err.message, 'error'); }
+    });
+  },
+
+  // ==================== AUDIT LOG ====================
+  async auditLog() {
+    let data = { data: [] };
+    try { data = await API.getAuditLog({ limit: 200 }); } catch (e) { /* empty */ }
+
+    const actionIcons = {
+      create: '+', update: '~', approve: '\u2713', reject: '\u2717',
+      delete: '\u2715', decommission: '\u2715', login: '\u2192', register: '\u2605',
+      deactivate: '\u2715', unlock: '\u2192', reset_password: '\u21BB',
+    };
+
+    return `
+      <div class="page-header">
+        <div><h2>Audit Log</h2><p>Immutable record of all governance activities</p></div>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline" onclick="Pages.filterAuditLog('')">All</button>
+          <button class="btn btn-sm btn-outline" onclick="Pages.filterAuditLog('ai_asset')">Assets</button>
+          <button class="btn btn-sm btn-outline" onclick="Pages.filterAuditLog('risk_assessment')">Risk</button>
+          <button class="btn btn-sm btn-outline" onclick="Pages.filterAuditLog('user')">Users</button>
+          <button class="btn btn-sm btn-outline" onclick="Pages.filterAuditLog('incident')">Incidents</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-container">
+          <table id="audit-table">
+            <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Entity Type</th><th>Entity ID</th><th>Details</th></tr></thead>
+            <tbody>
+              ${data.data.length > 0 ? data.data.map(a => `
+                <tr data-entity-type="${a.entity_type}">
+                  <td style="white-space:nowrap">${App.formatDate(a.created_at)}</td>
+                  <td>${a.user_name || 'System'}<br><span style="font-size:11px;color:var(--text-muted)">${a.user_email || ''}</span></td>
+                  <td><span style="font-weight:700;margin-right:4px">${actionIcons[a.action] || '?'}</span> ${a.action}</td>
+                  <td>${(a.entity_type || '').replace(/_/g, ' ')}</td>
+                  <td style="font-family:monospace;font-size:11px">${a.entity_id ? a.entity_id.slice(0, 8) + '...' : '-'}</td>
+                  <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.details && a.details !== '{}' ? a.details : '-'}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="6" class="empty-state">No audit records found</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  },
+
+  async filterAuditLog(entityType) {
+    try {
+      const params = entityType ? { entity_type: entityType, limit: 200 } : { limit: 200 };
+      const data = await API.getAuditLog(params);
+      const rows = document.querySelectorAll('#audit-table tbody tr');
+      if (entityType) {
+        rows.forEach(row => {
+          row.style.display = row.dataset.entityType === entityType ? '' : 'none';
+        });
+      } else {
+        rows.forEach(row => { row.style.display = ''; });
+      }
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ==================== EXPORT HELPERS ====================
+  exportTableToCSV(tableId, filename) {
+    const table = document.getElementById(tableId) || document.querySelector('table');
+    if (!table) return;
+    const rows = [];
+    table.querySelectorAll('tr').forEach(tr => {
+      const cells = [];
+      tr.querySelectorAll('th, td').forEach(td => {
+        cells.push('"' + td.textContent.replace(/"/g, '""').trim() + '"');
+      });
+      rows.push(cells.join(','));
+    });
+    const csv = rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename || 'export.csv';
+    a.click(); URL.revokeObjectURL(url);
   },
 };

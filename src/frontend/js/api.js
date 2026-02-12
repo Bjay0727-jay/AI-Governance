@@ -136,6 +136,7 @@ const API = {
     const qs = new URLSearchParams(params).toString();
     return this.request('GET', `/impact-assessments${qs ? '?' + qs : ''}`);
   },
+  getImpactAssessment(id) { return this.request('GET', `/impact-assessments/${id}`); },
   createImpactAssessment(body) { return this.request('POST', '/impact-assessments', body); },
   updateImpactAssessment(id, body) { return this.request('PUT', `/impact-assessments/${id}`, body); },
 
@@ -153,6 +154,7 @@ const API = {
 
   // --- Vendors ---
   getVendorAssessments() { return this.request('GET', '/vendor-assessments'); },
+  getVendorAssessment(id) { return this.request('GET', `/vendor-assessments/${id}`); },
   createVendorAssessment(body) { return this.request('POST', '/vendor-assessments', body); },
   updateVendorAssessment(id, body) { return this.request('PUT', `/vendor-assessments/${id}`, body); },
   calculateVendorScore(id) { return this.request('POST', `/vendor-assessments/${id}/score`); },
@@ -189,4 +191,19 @@ const API = {
   },
   createIncident(body) { return this.request('POST', '/incidents', body); },
   updateIncident(id, body) { return this.request('PUT', `/incidents/${id}`, body); },
+
+  // --- User Management ---
+  getUsers() { return this.request('GET', '/users'); },
+  getUser(id) { return this.request('GET', `/users/${id}`); },
+  createUser(body) { return this.request('POST', '/users', body); },
+  updateUser(id, body) { return this.request('PUT', `/users/${id}`, body); },
+  deactivateUser(id) { return this.request('DELETE', `/users/${id}`); },
+  unlockUser(id) { return this.request('POST', `/users/${id}/unlock`); },
+  resetUserPassword(id, body) { return this.request('POST', `/users/${id}/reset-password`, body); },
+
+  // --- Audit Log ---
+  getAuditLog(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/audit-log${qs ? '?' + qs : ''}`);
+  },
 };
