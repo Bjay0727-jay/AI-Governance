@@ -9,16 +9,49 @@ const Pages = {
   // ==================== DASHBOARD ====================
   async dashboard() {
     let stats = { data: { ai_portfolio: { total_assets: 0, risk_distribution: {}, status_distribution: {}, category_distribution: {} }, risk_assessments: {}, monitoring: {}, open_incidents: {}, compliance: {} } };
-    try { stats = await API.getDashboardStats(); } catch (e) { /* use defaults */ }
+    let onboarding = { data: { steps: [], percentage: 100, completed: 0, total: 0 } };
+    try {
+      [stats, onboarding] = await Promise.all([
+        API.getDashboardStats(),
+        API.getOnboardingProgress(),
+      ]);
+    } catch (e) { /* use defaults */ }
     const d = stats.data;
     const total = d.ai_portfolio.total_assets;
     const risk = d.ai_portfolio.risk_distribution;
     const comp = d.compliance;
+    const ob = onboarding.data;
+
+    const showOnboarding = ob.percentage < 100;
 
     return `
       <div class="page-header">
         <div><h2>AI Governance Dashboard</h2><p>Portfolio overview and compliance status for ${API.tenant?.name || 'your organization'}</p></div>
       </div>
+      ${showOnboarding ? `
+      <div class="card onboarding-card" style="margin-bottom:24px">
+        <div class="card-header">
+          <h3>Getting Started - ${ob.completed}/${ob.total} Complete</h3>
+          <button class="btn btn-sm btn-outline" onclick="document.querySelector('.onboarding-card').style.display='none'">Dismiss</button>
+        </div>
+        <div class="onboarding-progress-bar" style="margin-bottom:16px">
+          <div class="onboarding-track">
+            <div class="onboarding-fill" style="width:${ob.percentage}%"></div>
+          </div>
+          <span class="onboarding-pct">${ob.percentage}%</span>
+        </div>
+        <div class="onboarding-steps">
+          ${ob.steps.map(s => `
+            <div class="onboarding-step ${s.completed ? 'completed' : ''}" ${!s.completed ? `onclick="Pages.onboardingNavigate('${s.key}')"` : ''}>
+              <span class="step-check">${s.completed ? '&#10003;' : '&#9675;'}</span>
+              <div class="step-info">
+                <strong>${s.label}</strong>
+                <span class="step-desc">${s.description}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>` : ''}
       <div class="stats-row">
         <div class="stat-card info"><div class="stat-value">${total}</div><div class="stat-label">AI Systems in Portfolio</div></div>
         <div class="stat-card critical"><div class="stat-value">${(risk.critical || 0) + (risk.high || 0)}</div><div class="stat-label">High/Critical Risk Systems</div></div>
@@ -675,6 +708,384 @@ const Pages = {
     } catch (err) { App.toast(err.message, 'error'); }
   },
 
+  // ==================== ONBOARDING NAVIGATION ====================
+  onboardingNavigate(step) {
+    const routes = {
+      add_asset: 'ai-assets', risk_assessment: 'risk-assessments',
+      impact_assessment: 'impact-assessments', compliance: 'compliance',
+      vendor_assessment: 'vendors', maturity: 'maturity', invite_team: 'users',
+    };
+    if (routes[step]) App.navigate(routes[step]);
+  },
+
+  // ==================== KNOWLEDGE BASE ====================
+  async knowledgeBase() {
+    let data = { data: [] };
+    try { data = await API.getKnowledgeBase(); } catch (e) { /* empty */ }
+
+    const categoryLabels = {
+      framework: 'Framework', regulatory: 'Regulatory', guide: 'How-To Guide',
+    };
+    const categoryIcons = {
+      framework: '&#9881;', regulatory: '&#9878;', guide: '&#9997;',
+    };
+
+    return `
+      <div class="page-header">
+        <div><h2>Knowledge Base</h2><p>Regulatory guidance, framework references, and how-to guides for healthcare AI governance</p></div>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline kb-filter active" onclick="Pages.filterKB('')">All</button>
+          <button class="btn btn-sm btn-outline kb-filter" onclick="Pages.filterKB('framework')">Frameworks</button>
+          <button class="btn btn-sm btn-outline kb-filter" onclick="Pages.filterKB('regulatory')">Regulatory</button>
+          <button class="btn btn-sm btn-outline kb-filter" onclick="Pages.filterKB('guide')">Guides</button>
+        </div>
+      </div>
+      <div class="kb-search" style="margin-bottom:20px">
+        <input type="text" id="kb-search-input" placeholder="Search articles..." class="form-input" style="width:100%;max-width:400px"
+          oninput="Pages.searchKB(this.value)">
+      </div>
+      <div class="kb-articles" id="kb-articles">
+        ${data.data.map(article => `
+          <div class="card kb-article" data-category="${article.category}" style="margin-bottom:12px;cursor:pointer"
+            onclick="Pages.expandKBArticle('${article.id}')">
+            <div class="card-header">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:18px">${categoryIcons[article.category] || ''}</span>
+                <div>
+                  <h3 style="margin:0">${article.title}</h3>
+                  <span class="badge badge-info" style="margin-top:4px">${categoryLabels[article.category] || article.category}</span>
+                  ${article.frameworks ? article.frameworks.map(f => `<span class="badge badge-moderate" style="margin-left:4px">${f}</span>`).join('') : ''}
+                </div>
+              </div>
+            </div>
+            <p style="color:var(--text-secondary);font-size:13px;margin:8px 0 0">${article.summary}</p>
+            <div class="kb-content" id="kb-${article.id}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+              <div class="kb-body">${article.content.split('\n').map(line => {
+                if (line.startsWith('**') && line.endsWith('**')) return `<h4>${line.replace(/\*\*/g, '')}</h4>`;
+                if (line.startsWith('- ')) return `<li>${line.slice(2)}</li>`;
+                return line ? `<p>${line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>` : '';
+              }).join('')}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+  },
+
+  expandKBArticle(articleId) {
+    const el = document.getElementById(`kb-${articleId}`);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  },
+
+  filterKB(category) {
+    document.querySelectorAll('.kb-filter').forEach(b => b.classList.remove('active'));
+    if (category) {
+      event.target.classList.add('active');
+    } else {
+      document.querySelector('.kb-filter').classList.add('active');
+    }
+    document.querySelectorAll('.kb-article').forEach(el => {
+      el.style.display = !category || el.dataset.category === category ? '' : 'none';
+    });
+  },
+
+  searchKB(term) {
+    const lower = term.toLowerCase();
+    document.querySelectorAll('.kb-article').forEach(el => {
+      const text = el.textContent.toLowerCase();
+      el.style.display = !term || text.includes(lower) ? '' : 'none';
+    });
+  },
+
+  // ==================== SUPPORT TICKETS ====================
+  async support() {
+    let data = { data: [] };
+    try { data = await API.getSupportTickets(); } catch (e) { /* empty */ }
+
+    const isAdmin = API.user?.role === 'admin';
+    const openCount = data.data.filter(t => ['open', 'in_progress', 'waiting'].includes(t.status)).length;
+    const resolvedCount = data.data.filter(t => ['resolved', 'closed'].includes(t.status)).length;
+
+    return `
+      <div class="page-header">
+        <div><h2>Support Center</h2><p>${isAdmin ? 'Manage all support tickets' : 'Submit and track your support requests'}</p></div>
+        <button class="btn btn-primary" id="btn-add-ticket">+ New Ticket</button>
+      </div>
+      <div class="stats-row" style="grid-template-columns: repeat(3, 1fr)">
+        <div class="stat-card info"><div class="stat-value">${data.data.length}</div><div class="stat-label">Total Tickets</div></div>
+        <div class="stat-card warning"><div class="stat-value">${openCount}</div><div class="stat-label">Open</div></div>
+        <div class="stat-card success"><div class="stat-value">${resolvedCount}</div><div class="stat-label">Resolved</div></div>
+      </div>
+      <div class="card">
+        <div class="table-container">
+          <table>
+            <thead><tr><th>Subject</th>${isAdmin ? '<th>Submitted By</th>' : ''}<th>Category</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${data.data.length > 0 ? data.data.map(t => `
+                <tr>
+                  <td><strong>${t.subject}</strong></td>
+                  ${isAdmin ? `<td>${t.created_by_name || 'Unknown'}<br><span style="font-size:11px;color:var(--text-muted)">${t.created_by_email || ''}</span></td>` : ''}
+                  <td>${App.badge(t.category)}</td>
+                  <td>${App.badge(t.priority)}</td>
+                  <td>${App.badge(t.status)}</td>
+                  <td>${App.formatDate(t.created_at)}</td>
+                  <td><button class="btn btn-sm btn-outline" onclick="Pages.viewTicket('${t.id}')">View</button></td>
+                </tr>
+              `).join('') : '<tr><td colspan="7" class="empty-state">No support tickets. Click "New Ticket" to submit a request.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  },
+
+  showTicketForm() {
+    App.openModal('Submit Support Ticket', `
+      <form id="ticket-form">
+        <div class="form-group"><label>Subject *</label><input type="text" id="tk-subject" required placeholder="Brief description of your issue"></div>
+        <div class="form-row">
+          <div class="form-group"><label>Category</label>
+            <select id="tk-category">
+              <option value="general">General</option>
+              <option value="technical">Technical Issue</option>
+              <option value="compliance">Compliance Question</option>
+              <option value="billing">Billing</option>
+              <option value="feature_request">Feature Request</option>
+              <option value="bug_report">Bug Report</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Priority</label>
+            <select id="tk-priority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label>Description *</label><textarea id="tk-desc" required rows="5" placeholder="Describe your issue in detail..."></textarea></div>
+      </form>
+    `, '<button class="btn btn-primary" id="tk-submit">Submit Ticket</button>');
+    document.getElementById('tk-submit').addEventListener('click', async () => {
+      try {
+        await API.createSupportTicket({
+          subject: document.getElementById('tk-subject').value,
+          description: document.getElementById('tk-desc').value,
+          category: document.getElementById('tk-category').value,
+          priority: document.getElementById('tk-priority').value,
+        });
+        App.closeModal();
+        App.toast('Support ticket submitted', 'success');
+        App.navigate('support');
+      } catch (err) { App.toast(err.message, 'error'); }
+    });
+  },
+
+  async viewTicket(ticketId) {
+    try {
+      const { data: t } = await API.getSupportTicket(ticketId);
+      const isAdmin = API.user?.role === 'admin';
+      App.openModal(`Ticket: ${t.subject}`, `
+        <div class="detail-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom:16px">
+          <div class="detail-item"><span class="detail-label">Status</span><span>${App.badge(t.status)}</span></div>
+          <div class="detail-item"><span class="detail-label">Priority</span><span>${App.badge(t.priority)}</span></div>
+          <div class="detail-item"><span class="detail-label">Category</span><span>${App.badge(t.category)}</span></div>
+          <div class="detail-item"><span class="detail-label">Created</span><span>${App.formatDate(t.created_at)}</span></div>
+        </div>
+        <div style="margin-bottom:16px">
+          <strong>Description:</strong>
+          <p style="margin-top:8px;white-space:pre-wrap;color:var(--text-secondary)">${t.description}</p>
+        </div>
+        ${t.admin_notes ? `<div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:6px">
+          <strong>Admin Response:</strong>
+          <p style="margin-top:8px;white-space:pre-wrap">${t.admin_notes}</p>
+        </div>` : ''}
+        ${isAdmin ? `
+          <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
+            <div class="form-row">
+              <div class="form-group"><label>Update Status</label>
+                <select id="tv-status">
+                  <option value="open" ${t.status==='open'?'selected':''}>Open</option>
+                  <option value="in_progress" ${t.status==='in_progress'?'selected':''}>In Progress</option>
+                  <option value="waiting" ${t.status==='waiting'?'selected':''}>Waiting</option>
+                  <option value="resolved" ${t.status==='resolved'?'selected':''}>Resolved</option>
+                  <option value="closed" ${t.status==='closed'?'selected':''}>Closed</option>
+                </select>
+              </div>
+              <div class="form-group"><label>Priority</label>
+                <select id="tv-priority">
+                  <option value="low" ${t.priority==='low'?'selected':''}>Low</option>
+                  <option value="medium" ${t.priority==='medium'?'selected':''}>Medium</option>
+                  <option value="high" ${t.priority==='high'?'selected':''}>High</option>
+                  <option value="urgent" ${t.priority==='urgent'?'selected':''}>Urgent</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group"><label>Admin Notes</label><textarea id="tv-notes" rows="3">${t.admin_notes || ''}</textarea></div>
+          </div>
+        ` : ''}
+      `, isAdmin ? '<button class="btn btn-primary" id="tv-save">Save Changes</button>' : '');
+      if (isAdmin) {
+        document.getElementById('tv-save').addEventListener('click', async () => {
+          try {
+            await API.updateSupportTicket(ticketId, {
+              status: document.getElementById('tv-status').value,
+              priority: document.getElementById('tv-priority').value,
+              admin_notes: document.getElementById('tv-notes').value,
+            });
+            App.closeModal();
+            App.toast('Ticket updated', 'success');
+            App.navigate('support');
+          } catch (err) { App.toast(err.message, 'error'); }
+        });
+      }
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ==================== FEATURE REQUESTS ====================
+  async featureRequests() {
+    let data = { data: [] };
+    try { data = await API.getFeatureRequests({ sort: 'votes' }); } catch (e) { /* empty */ }
+
+    const isAdmin = API.user?.role === 'admin';
+    const categoryLabels = {
+      governance: 'Governance', compliance: 'Compliance', reporting: 'Reporting',
+      monitoring: 'Monitoring', integration: 'Integration', general: 'General',
+    };
+
+    return `
+      <div class="page-header">
+        <div><h2>Feature Requests</h2><p>Suggest and vote on platform improvements</p></div>
+        <button class="btn btn-primary" id="btn-add-feature">+ Suggest Feature</button>
+      </div>
+      <div class="btn-group" style="margin-bottom:16px">
+        <button class="btn btn-sm btn-outline fr-sort active" onclick="Pages.sortFeatureRequests('votes')">Most Voted</button>
+        <button class="btn btn-sm btn-outline fr-sort" onclick="Pages.sortFeatureRequests('recent')">Most Recent</button>
+      </div>
+      <div id="fr-list">
+        ${data.data.length > 0 ? data.data.map(fr => `
+          <div class="card fr-card" style="margin-bottom:12px">
+            <div style="display:flex;gap:16px;align-items:flex-start">
+              <div class="vote-box ${fr.user_voted ? 'voted' : ''}" onclick="Pages.toggleVote('${fr.id}')" title="${fr.user_voted ? 'Remove vote' : 'Upvote'}">
+                <span class="vote-arrow">&#9650;</span>
+                <span class="vote-count" id="vc-${fr.id}">${fr.vote_count}</span>
+              </div>
+              <div style="flex:1">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                  <div>
+                    <h3 style="margin:0 0 4px">${fr.title}</h3>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                      <span class="badge badge-info">${categoryLabels[fr.category] || fr.category}</span>
+                      ${App.badge(fr.status)}
+                      <span style="font-size:11px;color:var(--text-muted)">by ${fr.created_by_name} &middot; ${App.formatDate(fr.created_at)}</span>
+                    </div>
+                  </div>
+                  ${isAdmin ? `<button class="btn btn-sm btn-outline" onclick="Pages.manageFeatureRequest('${fr.id}')">Manage</button>` : ''}
+                </div>
+                <p style="margin:8px 0 0;color:var(--text-secondary);font-size:13px">${fr.description}</p>
+                ${fr.admin_response ? `<div style="margin-top:8px;padding:8px 12px;background:var(--bg);border-radius:6px;font-size:13px">
+                  <strong>Official Response:</strong> ${fr.admin_response}
+                </div>` : ''}
+              </div>
+            </div>
+          </div>
+        `).join('') : '<div class="card"><div class="empty-state"><p>No feature requests yet. Be the first to suggest an improvement!</p></div></div>'}
+      </div>`;
+  },
+
+  showFeatureForm() {
+    App.openModal('Suggest a Feature', `
+      <form id="feature-form">
+        <div class="form-group"><label>Title *</label><input type="text" id="fr-title" required placeholder="Brief feature summary"></div>
+        <div class="form-group"><label>Category</label>
+          <select id="fr-category">
+            <option value="general">General</option>
+            <option value="governance">Governance</option>
+            <option value="compliance">Compliance</option>
+            <option value="reporting">Reporting</option>
+            <option value="monitoring">Monitoring</option>
+            <option value="integration">Integration</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Description *</label><textarea id="fr-desc" required rows="5" placeholder="Describe the feature you'd like to see, why it would be valuable, and any specific requirements..."></textarea></div>
+      </form>
+    `, '<button class="btn btn-primary" id="fr-submit">Submit Feature Request</button>');
+    document.getElementById('fr-submit').addEventListener('click', async () => {
+      try {
+        await API.createFeatureRequest({
+          title: document.getElementById('fr-title').value,
+          description: document.getElementById('fr-desc').value,
+          category: document.getElementById('fr-category').value,
+        });
+        App.closeModal();
+        App.toast('Feature request submitted', 'success');
+        App.navigate('feature-requests');
+      } catch (err) { App.toast(err.message, 'error'); }
+    });
+  },
+
+  async toggleVote(featureId) {
+    try {
+      const result = await API.voteFeatureRequest(featureId);
+      const countEl = document.getElementById(`vc-${featureId}`);
+      if (countEl) countEl.textContent = result.data.vote_count;
+      const box = countEl?.closest('.vote-box');
+      if (box) box.classList.toggle('voted', result.voted);
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  async sortFeatureRequests(sort) {
+    document.querySelectorAll('.fr-sort').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    try {
+      const data = await API.getFeatureRequests({ sort });
+      App.navigate('feature-requests');
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  async manageFeatureRequest(frId) {
+    try {
+      const data = await API.getFeatureRequests();
+      const fr = data.data.find(f => f.id === frId);
+      if (!fr) return;
+      App.openModal(`Manage: ${fr.title}`, `
+        <div class="form-group"><label>Status</label>
+          <select id="mfr-status">
+            <option value="submitted" ${fr.status==='submitted'?'selected':''}>Submitted</option>
+            <option value="under_review" ${fr.status==='under_review'?'selected':''}>Under Review</option>
+            <option value="planned" ${fr.status==='planned'?'selected':''}>Planned</option>
+            <option value="in_progress" ${fr.status==='in_progress'?'selected':''}>In Progress</option>
+            <option value="completed" ${fr.status==='completed'?'selected':''}>Completed</option>
+            <option value="declined" ${fr.status==='declined'?'selected':''}>Declined</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Official Response</label><textarea id="mfr-response" rows="3">${fr.admin_response || ''}</textarea></div>
+      `, '<button class="btn btn-primary" id="mfr-save">Save</button>');
+      document.getElementById('mfr-save').addEventListener('click', async () => {
+        try {
+          await API.updateFeatureRequest(frId, {
+            status: document.getElementById('mfr-status').value,
+            admin_response: document.getElementById('mfr-response').value,
+          });
+          App.closeModal();
+          App.toast('Feature request updated', 'success');
+          App.navigate('feature-requests');
+        } catch (err) { App.toast(err.message, 'error'); }
+      });
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ==================== CONTEXTUAL HELP ====================
+  showHelp(topic) {
+    const helpContent = {
+      risk_scores: '<h4>Risk Scoring Guide</h4><p>Rate each dimension from 1 (low risk) to 5 (critical risk):</p><ul><li><strong>Patient Safety (25%)</strong> - Could incorrect output harm patients? Score 5 if errors could cause mortality.</li><li><strong>Bias/Fairness (20%)</strong> - Does the system perform equitably across demographic groups?</li><li><strong>Data Privacy (15%)</strong> - How much PHI is accessed? What are de-identification measures?</li><li><strong>Clinical Validity (15%)</strong> - Is there peer-reviewed evidence supporting the AI\'s claims?</li><li><strong>Cybersecurity (15%)</strong> - What is the attack surface? Model poisoning risk?</li><li><strong>Regulatory (10%)</strong> - Are there compliance gaps with FDA, HIPAA, state laws?</li></ul>',
+      asset_categories: '<h4>AI Asset Categories</h4><ul><li><strong>Clinical Decision Support</strong> - Tools that assist clinicians in making care decisions</li><li><strong>Diagnostic Imaging</strong> - AI-powered radiology, pathology, or other imaging analysis</li><li><strong>Predictive Analytics</strong> - Patient risk prediction, readmission models, sepsis alerts</li><li><strong>NLP Extraction</strong> - Natural language processing for clinical notes, coding</li><li><strong>Operational</strong> - Scheduling, resource optimization, supply chain</li><li><strong>Administrative</strong> - Prior auth, claims processing, documentation</li><li><strong>Revenue Cycle</strong> - Coding optimization, denial prevention, payment prediction</li></ul>',
+      risk_tiers: '<h4>Risk Tier Definitions</h4><ul><li><strong>Critical</strong> - Direct life-safety impact. Requires Board-level oversight, continuous monitoring, and annual third-party audit.</li><li><strong>High</strong> - Significant clinical or privacy impact. Requires executive sponsor, quarterly reviews, and bias testing.</li><li><strong>Moderate</strong> - Indirect clinical impact or operational significance. Requires designated owner and semi-annual review.</li><li><strong>Low</strong> - Administrative or minimal clinical impact. Standard documentation and annual review.</li></ul>',
+      vendor_scoring: '<h4>Vendor Scoring Methodology</h4><p>Each dimension is rated 1-5 and weighted:</p><ul><li>Transparency: 15%</li><li>Bias Testing: 25%</li><li>Security: 25%</li><li>Data Practices: 20%</li><li>Contractual: 15%</li></ul><p>Overall score (0-100): Below 40 = Rejected, 40-60 = Conditional, Above 60 = Approved</p>',
+    };
+    const content = helpContent[topic] || '<p>No help available for this topic.</p>';
+    App.openModal('Help', `<div class="kb-body">${content}</div>`, '');
+  },
+
   // ==================== PAGE EVENT BINDINGS ====================
   bindPageEvents(page) {
     switch (page) {
@@ -699,6 +1110,12 @@ const Pages = {
       case 'users':
         document.getElementById('btn-add-user')?.addEventListener('click', () => this.showUserForm());
         break;
+      case 'support':
+        document.getElementById('btn-add-ticket')?.addEventListener('click', () => this.showTicketForm());
+        break;
+      case 'feature-requests':
+        document.getElementById('btn-add-feature')?.addEventListener('click', () => this.showFeatureForm());
+        break;
     }
   },
 
@@ -712,7 +1129,7 @@ const Pages = {
           <div class="form-group"><label>Version</label><input type="text" id="af-version"></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Category *</label>
+          <div class="form-group"><label>Category * <button type="button" class="help-btn-inline" onclick="Pages.showHelp('asset_categories')" title="Category guide">?</button></label>
             <select id="af-category">
               <option value="clinical_decision_support">Clinical Decision Support</option>
               <option value="diagnostic_imaging">Diagnostic Imaging</option>
@@ -724,7 +1141,7 @@ const Pages = {
               <option value="other">Other</option>
             </select>
           </div>
-          <div class="form-group"><label>Risk Tier</label>
+          <div class="form-group"><label>Risk Tier <button type="button" class="help-btn-inline" onclick="Pages.showHelp('risk_tiers')" title="Risk tier guide">?</button></label>
             <select id="af-risk"><option value="low">Low</option><option value="moderate" selected>Moderate</option><option value="high">High</option><option value="critical">Critical</option></select>
           </div>
         </div>
@@ -767,13 +1184,17 @@ const Pages = {
         <div class="form-group"><label>Assessment Type *</label>
           <select id="rf-type"><option value="initial">Initial</option><option value="periodic">Periodic</option><option value="triggered">Triggered</option><option value="pre_deployment">Pre-Deployment</option></select>
         </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong>Risk Dimensions</strong>
+          <button type="button" class="btn btn-sm btn-outline help-btn" onclick="Pages.showHelp('risk_scores')" title="Scoring guide">? Help</button>
+        </div>
         <div class="score-grid">
-          <div class="score-item"><label>Patient Safety (1-5)</label><input type="number" id="rf-safety" min="1" max="5" value="3"></div>
-          <div class="score-item"><label>Bias/Fairness (1-5)</label><input type="number" id="rf-bias" min="1" max="5" value="3"></div>
-          <div class="score-item"><label>Data Privacy (1-5)</label><input type="number" id="rf-privacy" min="1" max="5" value="3"></div>
-          <div class="score-item"><label>Clinical Validity (1-5)</label><input type="number" id="rf-clinical" min="1" max="5" value="3"></div>
-          <div class="score-item"><label>Cybersecurity (1-5)</label><input type="number" id="rf-cyber" min="1" max="5" value="3"></div>
-          <div class="score-item"><label>Regulatory (1-5)</label><input type="number" id="rf-reg" min="1" max="5" value="3"></div>
+          <div class="score-item"><label>Patient Safety (1-5) <span class="tooltip-icon" title="Weight: 25%. Score 5 if errors could cause mortality.">&#9432;</span></label><input type="number" id="rf-safety" min="1" max="5" value="3"></div>
+          <div class="score-item"><label>Bias/Fairness (1-5) <span class="tooltip-icon" title="Weight: 20%. Risk of disparate impact across demographic groups.">&#9432;</span></label><input type="number" id="rf-bias" min="1" max="5" value="3"></div>
+          <div class="score-item"><label>Data Privacy (1-5) <span class="tooltip-icon" title="Weight: 15%. PHI exposure risk and de-identification effectiveness.">&#9432;</span></label><input type="number" id="rf-privacy" min="1" max="5" value="3"></div>
+          <div class="score-item"><label>Clinical Validity (1-5) <span class="tooltip-icon" title="Weight: 15%. Scientific evidence supporting the AI's claims.">&#9432;</span></label><input type="number" id="rf-clinical" min="1" max="5" value="3"></div>
+          <div class="score-item"><label>Cybersecurity (1-5) <span class="tooltip-icon" title="Weight: 15%. Attack surface, model poisoning risk, API security.">&#9432;</span></label><input type="number" id="rf-cyber" min="1" max="5" value="3"></div>
+          <div class="score-item"><label>Regulatory (1-5) <span class="tooltip-icon" title="Weight: 10%. Compliance gaps with FDA, HIPAA, state laws.">&#9432;</span></label><input type="number" id="rf-reg" min="1" max="5" value="3"></div>
         </div>
         <div class="form-group" style="margin-top:12px"><label>Recommendations</label><textarea id="rf-recs"></textarea></div>
       </form>

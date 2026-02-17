@@ -129,6 +129,9 @@ const App = {
         case 'audit-log': content.innerHTML = await Pages.auditLog(); break;
         case 'asset-detail': content.innerHTML = await Pages.assetDetail(); break;
         case 'reports': content.innerHTML = await Pages.reports(); break;
+        case 'knowledge-base': content.innerHTML = await Pages.knowledgeBase(); break;
+        case 'support': content.innerHTML = await Pages.support(); break;
+        case 'feature-requests': content.innerHTML = await Pages.featureRequests(); break;
         default: content.innerHTML = '<div class="empty-state"><p>Page not found</p></div>';
       }
       // Bind page-specific events after rendering

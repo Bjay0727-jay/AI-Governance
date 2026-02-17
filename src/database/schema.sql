@@ -389,3 +389,68 @@ CREATE TABLE IF NOT EXISTS evidence (
 
 CREATE INDEX idx_evidence_entity ON evidence(entity_type, entity_id);
 CREATE INDEX idx_evidence_tenant ON evidence(tenant_id);
+
+-- ============================================================================
+-- SUPPORT TICKETS - Customer self-service portal
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL REFERENCES users(id),
+    subject TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'general' CHECK (category IN (
+        'general', 'technical', 'compliance', 'billing', 'feature_request', 'bug_report'
+    )),
+    priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN (
+        'open', 'in_progress', 'waiting', 'resolved', 'closed'
+    )),
+    admin_notes TEXT,
+    resolved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_tickets_tenant ON support_tickets(tenant_id);
+CREATE INDEX idx_tickets_status ON support_tickets(tenant_id, status);
+CREATE INDEX idx_tickets_created_by ON support_tickets(created_by);
+
+-- ============================================================================
+-- FEATURE REQUESTS - Community feedback and voting
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS feature_requests (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'general' CHECK (category IN (
+        'governance', 'compliance', 'reporting', 'monitoring', 'integration', 'general'
+    )),
+    status TEXT NOT NULL DEFAULT 'submitted' CHECK (status IN (
+        'submitted', 'under_review', 'planned', 'in_progress', 'completed', 'declined'
+    )),
+    vote_count INTEGER NOT NULL DEFAULT 0,
+    admin_response TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_feature_requests_tenant ON feature_requests(tenant_id);
+CREATE INDEX idx_feature_requests_status ON feature_requests(status);
+
+-- ============================================================================
+-- FEATURE REQUEST VOTES - Track user votes on feature requests
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS feature_request_votes (
+    id TEXT PRIMARY KEY,
+    feature_request_id TEXT NOT NULL REFERENCES feature_requests(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(feature_request_id, user_id)
+);
+
+CREATE INDEX idx_votes_request ON feature_request_votes(feature_request_id);
+CREATE INDEX idx_votes_user ON feature_request_votes(user_id);

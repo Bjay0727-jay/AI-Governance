@@ -214,4 +214,31 @@ const API = {
   },
   createEvidence(body) { return this.request('POST', '/evidence', body); },
   deleteEvidence(id) { return this.request('DELETE', `/evidence/${id}`); },
+
+  // --- Onboarding ---
+  getOnboardingProgress() { return this.request('GET', '/onboarding/progress'); },
+
+  // --- Support Tickets ---
+  getSupportTickets(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/support-tickets${qs ? '?' + qs : ''}`);
+  },
+  getSupportTicket(id) { return this.request('GET', `/support-tickets/${id}`); },
+  createSupportTicket(body) { return this.request('POST', '/support-tickets', body); },
+  updateSupportTicket(id, body) { return this.request('PUT', `/support-tickets/${id}`, body); },
+
+  // --- Feature Requests ---
+  getFeatureRequests(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/feature-requests${qs ? '?' + qs : ''}`);
+  },
+  createFeatureRequest(body) { return this.request('POST', '/feature-requests', body); },
+  voteFeatureRequest(id) { return this.request('POST', `/feature-requests/${id}/vote`); },
+  updateFeatureRequest(id, body) { return this.request('PUT', `/feature-requests/${id}`, body); },
+
+  // --- Knowledge Base ---
+  getKnowledgeBase(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/knowledge-base${qs ? '?' + qs : ''}`);
+  },
 };

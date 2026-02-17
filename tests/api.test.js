@@ -1114,3 +1114,305 @@ describe('Security', () => {
     expect(res3.status).toBe(200);
   });
 });
+
+// ==================== ONBOARDING PROGRESS ====================
+
+describe('Onboarding Progress', () => {
+  test('GET /api/v1/onboarding/progress returns completion steps', async () => {
+    const res = await request(app)
+      .get('/api/v1/onboarding/progress')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.steps).toBeInstanceOf(Array);
+    expect(res.body.data.steps.length).toBe(8);
+    expect(res.body.data.percentage).toBeGreaterThan(0);
+    expect(res.body.data.completed).toBeGreaterThan(0);
+    // Registration step should always be completed
+    expect(res.body.data.steps[0].key).toBe('register');
+    expect(res.body.data.steps[0].completed).toBe(true);
+  });
+
+  test('Onboarding detects completed entities', async () => {
+    const res = await request(app)
+      .get('/api/v1/onboarding/progress')
+      .set('Authorization', `Bearer ${adminToken}`);
+    // We created assets, risk assessments, impact assessments, vendor assessments, maturity
+    const steps = res.body.data.steps;
+    const assetStep = steps.find(s => s.key === 'add_asset');
+    expect(assetStep.completed).toBe(true);
+    const riskStep = steps.find(s => s.key === 'risk_assessment');
+    expect(riskStep.completed).toBe(true);
+  });
+
+  test('Onboarding requires authentication', async () => {
+    const res = await request(app).get('/api/v1/onboarding/progress');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ==================== SUPPORT TICKETS ====================
+
+describe('Support Tickets', () => {
+  let ticketId;
+
+  test('POST /api/v1/support-tickets creates ticket', async () => {
+    const res = await request(app)
+      .post('/api/v1/support-tickets')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        subject: 'Cannot export compliance report',
+        description: 'When I click export, nothing happens. Browser: Chrome 120.',
+        category: 'technical',
+        priority: 'high',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.subject).toBe('Cannot export compliance report');
+    expect(res.body.data.category).toBe('technical');
+    expect(res.body.data.priority).toBe('high');
+    expect(res.body.data.status).toBe('open');
+    ticketId = res.body.data.id;
+  });
+
+  test('POST /api/v1/support-tickets requires subject and description', async () => {
+    const res = await request(app)
+      .post('/api/v1/support-tickets')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ subject: 'Only subject' });
+    expect(res.status).toBe(400);
+  });
+
+  test('GET /api/v1/support-tickets lists tickets', async () => {
+    const res = await request(app)
+      .get('/api/v1/support-tickets')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0].created_by_name).toBeTruthy();
+  });
+
+  test('GET /api/v1/support-tickets/:id returns ticket detail', async () => {
+    const res = await request(app)
+      .get(`/api/v1/support-tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.subject).toBe('Cannot export compliance report');
+  });
+
+  test('PUT /api/v1/support-tickets/:id updates status and adds admin notes', async () => {
+    const res = await request(app)
+      .put(`/api/v1/support-tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        status: 'in_progress',
+        admin_notes: 'Investigating the export issue',
+        priority: 'medium',
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('in_progress');
+    expect(res.body.data.admin_notes).toBe('Investigating the export issue');
+    expect(res.body.data.priority).toBe('medium');
+  });
+
+  test('PUT /api/v1/support-tickets/:id resolve sets resolved_at', async () => {
+    const res = await request(app)
+      .put(`/api/v1/support-tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'resolved' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('resolved');
+    expect(res.body.data.resolved_at).toBeTruthy();
+  });
+
+  test('Viewer can create and see own tickets', async () => {
+    const createRes = await request(app)
+      .post('/api/v1/support-tickets')
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ subject: 'Viewer ticket', description: 'I need help' });
+    expect(createRes.status).toBe(201);
+
+    const listRes = await request(app)
+      .get('/api/v1/support-tickets')
+      .set('Authorization', `Bearer ${viewerToken}`);
+    expect(listRes.status).toBe(200);
+    // Viewer should only see own tickets
+    expect(listRes.body.data.every(t => t.created_by === viewerUserId)).toBe(true);
+  });
+
+  test('GET /api/v1/support-tickets/:id returns 404 for unknown ID', async () => {
+    const res = await request(app)
+      .get('/api/v1/support-tickets/nonexistent')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+// ==================== FEATURE REQUESTS ====================
+
+describe('Feature Requests', () => {
+  let featureId;
+
+  test('POST /api/v1/feature-requests creates feature request with auto-vote', async () => {
+    const res = await request(app)
+      .post('/api/v1/feature-requests')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Add PDF export for compliance reports',
+        description: 'Would be great to export compliance reports as branded PDF documents for board presentations.',
+        category: 'reporting',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.title).toBe('Add PDF export for compliance reports');
+    expect(res.body.data.category).toBe('reporting');
+    expect(res.body.data.vote_count).toBe(1); // Auto-voted by creator
+    expect(res.body.data.status).toBe('submitted');
+    featureId = res.body.data.id;
+  });
+
+  test('POST /api/v1/feature-requests requires title and description', async () => {
+    const res = await request(app)
+      .post('/api/v1/feature-requests')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Only title' });
+    expect(res.status).toBe(400);
+  });
+
+  test('GET /api/v1/feature-requests lists with vote status', async () => {
+    const res = await request(app)
+      .get('/api/v1/feature-requests')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0].user_voted).toBeDefined();
+  });
+
+  test('GET /api/v1/feature-requests supports sort by votes', async () => {
+    const res = await request(app)
+      .get('/api/v1/feature-requests?sort=votes')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+  });
+
+  test('POST /api/v1/feature-requests/:id/vote toggles vote (unvote)', async () => {
+    // Admin already auto-voted, so this should unvote
+    const res = await request(app)
+      .post(`/api/v1/feature-requests/${featureId}/vote`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.voted).toBe(false);
+    expect(res.body.data.vote_count).toBe(0);
+  });
+
+  test('POST /api/v1/feature-requests/:id/vote toggles vote (re-vote)', async () => {
+    const res = await request(app)
+      .post(`/api/v1/feature-requests/${featureId}/vote`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.voted).toBe(true);
+    expect(res.body.data.vote_count).toBe(1);
+  });
+
+  test('Viewer can vote on feature requests', async () => {
+    const res = await request(app)
+      .post(`/api/v1/feature-requests/${featureId}/vote`)
+      .set('Authorization', `Bearer ${viewerToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.voted).toBe(true);
+    expect(res.body.data.vote_count).toBe(2);
+  });
+
+  test('PUT /api/v1/feature-requests/:id admin updates status', async () => {
+    const res = await request(app)
+      .put(`/api/v1/feature-requests/${featureId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        status: 'planned',
+        admin_response: 'Great idea! We plan to implement PDF export in Q3.',
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('planned');
+    expect(res.body.data.admin_response).toMatch(/PDF export/);
+  });
+
+  test('PUT /api/v1/feature-requests/:id blocked for non-admins', async () => {
+    const res = await request(app)
+      .put(`/api/v1/feature-requests/${featureId}`)
+      .set('Authorization', `Bearer ${viewerToken}`)
+      .send({ status: 'completed' });
+    expect(res.status).toBe(403);
+  });
+
+  test('POST /api/v1/feature-requests/:id/vote returns 404 for unknown ID', async () => {
+    const res = await request(app)
+      .post('/api/v1/feature-requests/nonexistent/vote')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+// ==================== KNOWLEDGE BASE ====================
+
+describe('Knowledge Base', () => {
+  test('GET /api/v1/knowledge-base returns articles', async () => {
+    const res = await request(app)
+      .get('/api/v1/knowledge-base')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0].title).toBeTruthy();
+    expect(res.body.data[0].content).toBeTruthy();
+    expect(res.body.data[0].category).toBeTruthy();
+  });
+
+  test('GET /api/v1/knowledge-base filters by category', async () => {
+    const res = await request(app)
+      .get('/api/v1/knowledge-base?category=framework')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.every(a => a.category === 'framework')).toBe(true);
+  });
+
+  test('GET /api/v1/knowledge-base supports search', async () => {
+    const res = await request(app)
+      .get('/api/v1/knowledge-base?search=HIPAA')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+  });
+
+  test('Knowledge base requires authentication', async () => {
+    const res = await request(app).get('/api/v1/knowledge-base');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ==================== API DOCUMENTATION ====================
+
+describe('API Documentation', () => {
+  test('GET /api/v1/docs returns API documentation', async () => {
+    const res = await request(app).get('/api/v1/docs');
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('ForgeAI Govern API');
+    expect(res.body.version).toBe('1.0.0');
+    expect(res.body.endpoints).toBeInstanceOf(Array);
+    expect(res.body.endpoints.length).toBeGreaterThan(30);
+    expect(res.body.authentication).toBeDefined();
+    expect(res.body.rate_limits).toBeDefined();
+  });
+
+  test('API docs includes all major endpoint categories', async () => {
+    const res = await request(app).get('/api/v1/docs');
+    const paths = res.body.endpoints.map(e => e.path);
+    expect(paths).toContain('/health');
+    expect(paths).toContain('/ai-assets');
+    expect(paths).toContain('/risk-assessments');
+    expect(paths).toContain('/support-tickets');
+    expect(paths).toContain('/feature-requests');
+    expect(paths).toContain('/knowledge-base');
+    expect(paths).toContain('/onboarding/progress');
+  });
+
+  test('API docs is publicly accessible (no auth required)', async () => {
+    const res = await request(app).get('/api/v1/docs');
+    expect(res.status).toBe(200);
+  });
+});

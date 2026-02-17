@@ -77,6 +77,76 @@ try {
   console.log('Evidence table created.\n');
 }
 
+// Ensure support_tickets table exists (migration for existing databases)
+try {
+  db.prepare('SELECT 1 FROM support_tickets LIMIT 1').first();
+} catch {
+  const ticketsSQL = `
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      created_by TEXT NOT NULL REFERENCES users(id),
+      subject TEXT NOT NULL,
+      description TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      status TEXT NOT NULL DEFAULT 'open',
+      admin_notes TEXT,
+      resolved_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_tickets_tenant ON support_tickets(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_tickets_status ON support_tickets(tenant_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tickets_created_by ON support_tickets(created_by);
+  `;
+  if (db.db && typeof db.db.exec === 'function') {
+    db.db.exec(ticketsSQL);
+  } else {
+    db.exec(ticketsSQL);
+  }
+  console.log('Support tickets table created.\n');
+}
+
+// Ensure feature_requests and votes tables exist (migration for existing databases)
+try {
+  db.prepare('SELECT 1 FROM feature_requests LIMIT 1').first();
+} catch {
+  const featureSQL = `
+    CREATE TABLE IF NOT EXISTS feature_requests (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      created_by TEXT NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      status TEXT NOT NULL DEFAULT 'submitted',
+      vote_count INTEGER NOT NULL DEFAULT 0,
+      admin_response TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_feature_requests_tenant ON feature_requests(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_feature_requests_status ON feature_requests(status);
+    CREATE TABLE IF NOT EXISTS feature_request_votes (
+      id TEXT PRIMARY KEY,
+      feature_request_id TEXT NOT NULL REFERENCES feature_requests(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(feature_request_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_votes_request ON feature_request_votes(feature_request_id);
+    CREATE INDEX IF NOT EXISTS idx_votes_user ON feature_request_votes(user_id);
+  `;
+  if (db.db && typeof db.db.exec === 'function') {
+    db.db.exec(featureSQL);
+  } else {
+    db.exec(featureSQL);
+  }
+  console.log('Feature requests tables created.\n');
+}
+
 // --- Build Environment Object (mimics Cloudflare env) ---
 const env = {
   DB: db,
@@ -1108,6 +1178,340 @@ app.delete('/api/v1/evidence/:id', requireAuth, (req, res) => {
   db.prepare('DELETE FROM evidence WHERE id = ?').bind(req.params.id).run();
   auditLog(req.user.tenant_id, req.user.user_id, 'delete', 'evidence', req.params.id, { title: existing.title });
   res.json({ message: 'Evidence deleted' });
+});
+
+// ==================== ONBOARDING PROGRESS ====================
+
+app.get('/api/v1/onboarding/progress', requireAuth, (req, res) => {
+  const tid = req.user.tenant_id;
+  const hasAssets = db.prepare('SELECT COUNT(*) as c FROM ai_assets WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasRiskAssessment = db.prepare('SELECT COUNT(*) as c FROM risk_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasImpactAssessment = db.prepare('SELECT COUNT(*) as c FROM impact_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasCompliance = db.prepare('SELECT COUNT(*) as c FROM control_implementations WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasVendorAssessment = db.prepare('SELECT COUNT(*) as c FROM vendor_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasMaturity = db.prepare('SELECT COUNT(*) as c FROM maturity_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasMultipleUsers = db.prepare('SELECT COUNT(*) as c FROM users WHERE tenant_id = ? AND status = \'active\'').bind(tid).first().c > 1;
+
+  const steps = [
+    { key: 'register', label: 'Create your organization', completed: true, description: 'Set up your ForgeAI Govern account' },
+    { key: 'add_asset', label: 'Register an AI system', completed: hasAssets, description: 'Add your first AI/ML system to the governance registry' },
+    { key: 'risk_assessment', label: 'Complete a risk assessment', completed: hasRiskAssessment, description: 'Evaluate risk across 6 dimensions for an AI system' },
+    { key: 'impact_assessment', label: 'Run an impact assessment', completed: hasImpactAssessment, description: 'Assess algorithmic bias and fairness' },
+    { key: 'compliance', label: 'Map compliance controls', completed: hasCompliance, description: 'Implement controls from NIST AI RMF, FDA SaMD, HIPAA' },
+    { key: 'vendor_assessment', label: 'Assess a vendor', completed: hasVendorAssessment, description: 'Evaluate a third-party AI vendor' },
+    { key: 'maturity', label: 'Assess governance maturity', completed: hasMaturity, description: 'Score your org across 7 governance domains' },
+    { key: 'invite_team', label: 'Invite team members', completed: hasMultipleUsers, description: 'Add colleagues with appropriate roles' },
+  ];
+
+  const completedCount = steps.filter(s => s.completed).length;
+  const percentage = Math.round((completedCount / steps.length) * 100);
+
+  res.json({ data: { steps, completed: completedCount, total: steps.length, percentage } });
+});
+
+// ==================== SUPPORT TICKETS ====================
+
+app.get('/api/v1/support-tickets', requireAuth, (req, res) => {
+  const { status, category } = req.query;
+  const isAdmin = authorize(req.user, ['admin']);
+  let where = 'WHERE t.tenant_id = ?';
+  const params = [req.user.tenant_id];
+  if (!isAdmin) { where += ' AND t.created_by = ?'; params.push(req.user.user_id); }
+  if (status) { where += ' AND t.status = ?'; params.push(status); }
+  if (category) { where += ' AND t.category = ?'; params.push(category); }
+  const results = db.prepare(
+    `SELECT t.*, u.first_name || ' ' || u.last_name as created_by_name, u.email as created_by_email
+     FROM support_tickets t JOIN users u ON t.created_by = u.id
+     ${where} ORDER BY t.created_at DESC`
+  ).bind(...params).all();
+  res.json({ data: results.results });
+});
+
+app.get('/api/v1/support-tickets/:id', requireAuth, (req, res) => {
+  const ticket = db.prepare(
+    `SELECT t.*, u.first_name || ' ' || u.last_name as created_by_name
+     FROM support_tickets t JOIN users u ON t.created_by = u.id
+     WHERE t.id = ? AND t.tenant_id = ?`
+  ).bind(req.params.id, req.user.tenant_id).first();
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (!authorize(req.user, ['admin']) && ticket.created_by !== req.user.user_id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  res.json({ data: ticket });
+});
+
+app.post('/api/v1/support-tickets', requireAuth, (req, res) => {
+  const { subject, description, category, priority } = req.body;
+  if (!subject || !description) return res.status(400).json({ error: 'subject and description are required' });
+
+  const validCategories = ['general', 'technical', 'compliance', 'billing', 'feature_request', 'bug_report'];
+  const validPriorities = ['low', 'medium', 'high', 'urgent'];
+  const cat = validCategories.includes(category) ? category : 'general';
+  const pri = validPriorities.includes(priority) ? priority : 'medium';
+
+  const id = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO support_tickets (id, tenant_id, created_by, subject, description, category, priority)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, req.user.tenant_id, req.user.user_id, sanitizeString(subject, 300),
+    sanitizeString(description, 5000), cat, pri).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'create', 'support_ticket', id, { subject, category: cat });
+  const ticket = db.prepare('SELECT * FROM support_tickets WHERE id = ?').bind(id).first();
+  res.status(201).json({ data: ticket });
+});
+
+app.put('/api/v1/support-tickets/:id', requireAuth, (req, res) => {
+  const existing = db.prepare('SELECT * FROM support_tickets WHERE id = ? AND tenant_id = ?')
+    .bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'Ticket not found' });
+
+  const isAdmin = authorize(req.user, ['admin']);
+  const isOwner = existing.created_by === req.user.user_id;
+  if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Access denied' });
+
+  const updates = []; const values = [];
+  if (req.body.status !== undefined) {
+    const validStatuses = ['open', 'in_progress', 'waiting', 'resolved', 'closed'];
+    if (validStatuses.includes(req.body.status)) {
+      updates.push('status = ?'); values.push(req.body.status);
+      if (['resolved', 'closed'].includes(req.body.status)) updates.push("resolved_at = datetime('now')");
+    }
+  }
+  if (req.body.admin_notes !== undefined && isAdmin) {
+    updates.push('admin_notes = ?'); values.push(sanitizeString(req.body.admin_notes, 5000));
+  }
+  if (req.body.priority !== undefined && isAdmin) {
+    const validPriorities = ['low', 'medium', 'high', 'urgent'];
+    if (validPriorities.includes(req.body.priority)) { updates.push('priority = ?'); values.push(req.body.priority); }
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+  updates.push("updated_at = datetime('now')");
+
+  db.prepare(`UPDATE support_tickets SET ${updates.join(', ')} WHERE id = ?`).bind(...values, req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'support_ticket', req.params.id, {});
+  const updated = db.prepare('SELECT * FROM support_tickets WHERE id = ?').bind(req.params.id).first();
+  res.json({ data: updated });
+});
+
+// ==================== FEATURE REQUESTS ====================
+
+app.get('/api/v1/feature-requests', requireAuth, (req, res) => {
+  const { status, category, sort } = req.query;
+  let where = 'WHERE fr.tenant_id = ?';
+  const params = [req.user.tenant_id];
+  if (status) { where += ' AND fr.status = ?'; params.push(status); }
+  if (category) { where += ' AND fr.category = ?'; params.push(category); }
+  const orderBy = sort === 'votes' ? 'fr.vote_count DESC' : 'fr.created_at DESC';
+  const results = db.prepare(
+    `SELECT fr.*, u.first_name || ' ' || u.last_name as created_by_name,
+      (SELECT COUNT(*) FROM feature_request_votes v WHERE v.feature_request_id = fr.id AND v.user_id = ?) as user_voted
+     FROM feature_requests fr JOIN users u ON fr.created_by = u.id
+     ${where} ORDER BY ${orderBy}`
+  ).bind(req.user.user_id, ...params).all();
+  res.json({ data: results.results });
+});
+
+app.post('/api/v1/feature-requests', requireAuth, (req, res) => {
+  const { title, description, category } = req.body;
+  if (!title || !description) return res.status(400).json({ error: 'title and description are required' });
+
+  const validCategories = ['governance', 'compliance', 'reporting', 'monitoring', 'integration', 'general'];
+  const cat = validCategories.includes(category) ? category : 'general';
+
+  const id = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO feature_requests (id, tenant_id, created_by, title, description, category, vote_count)
+     VALUES (?, ?, ?, ?, ?, ?, 1)`
+  ).bind(id, req.user.tenant_id, req.user.user_id, sanitizeString(title, 300),
+    sanitizeString(description, 5000), cat).run();
+
+  // Auto-vote for creator
+  db.prepare(
+    `INSERT INTO feature_request_votes (id, feature_request_id, user_id, tenant_id)
+     VALUES (?, ?, ?, ?)`
+  ).bind(crypto.randomUUID(), id, req.user.user_id, req.user.tenant_id).run();
+
+  auditLog(req.user.tenant_id, req.user.user_id, 'create', 'feature_request', id, { title, category: cat });
+  const fr = db.prepare('SELECT * FROM feature_requests WHERE id = ?').bind(id).first();
+  res.status(201).json({ data: fr });
+});
+
+app.post('/api/v1/feature-requests/:id/vote', requireAuth, (req, res) => {
+  const fr = db.prepare('SELECT * FROM feature_requests WHERE id = ? AND tenant_id = ?')
+    .bind(req.params.id, req.user.tenant_id).first();
+  if (!fr) return res.status(404).json({ error: 'Feature request not found' });
+
+  const existingVote = db.prepare(
+    'SELECT id FROM feature_request_votes WHERE feature_request_id = ? AND user_id = ?'
+  ).bind(req.params.id, req.user.user_id).first();
+
+  if (existingVote) {
+    // Unvote
+    db.prepare('DELETE FROM feature_request_votes WHERE id = ?').bind(existingVote.id).run();
+    db.prepare('UPDATE feature_requests SET vote_count = vote_count - 1 WHERE id = ?').bind(req.params.id).run();
+    const updated = db.prepare('SELECT * FROM feature_requests WHERE id = ?').bind(req.params.id).first();
+    return res.json({ data: updated, voted: false });
+  }
+
+  // Vote
+  db.prepare(
+    `INSERT INTO feature_request_votes (id, feature_request_id, user_id, tenant_id)
+     VALUES (?, ?, ?, ?)`
+  ).bind(crypto.randomUUID(), req.params.id, req.user.user_id, req.user.tenant_id).run();
+  db.prepare('UPDATE feature_requests SET vote_count = vote_count + 1 WHERE id = ?').bind(req.params.id).run();
+  const updated = db.prepare('SELECT * FROM feature_requests WHERE id = ?').bind(req.params.id).first();
+  res.json({ data: updated, voted: true });
+});
+
+app.put('/api/v1/feature-requests/:id', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+  const existing = db.prepare('SELECT * FROM feature_requests WHERE id = ? AND tenant_id = ?')
+    .bind(req.params.id, req.user.tenant_id).first();
+  if (!existing) return res.status(404).json({ error: 'Feature request not found' });
+
+  const updates = []; const values = [];
+  if (req.body.status !== undefined) {
+    const validStatuses = ['submitted', 'under_review', 'planned', 'in_progress', 'completed', 'declined'];
+    if (validStatuses.includes(req.body.status)) { updates.push('status = ?'); values.push(req.body.status); }
+  }
+  if (req.body.admin_response !== undefined) {
+    updates.push('admin_response = ?'); values.push(sanitizeString(req.body.admin_response, 5000));
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+  updates.push("updated_at = datetime('now')");
+
+  db.prepare(`UPDATE feature_requests SET ${updates.join(', ')} WHERE id = ?`).bind(...values, req.params.id).run();
+  auditLog(req.user.tenant_id, req.user.user_id, 'update', 'feature_request', req.params.id, {});
+  const updated = db.prepare('SELECT * FROM feature_requests WHERE id = ?').bind(req.params.id).first();
+  res.json({ data: updated });
+});
+
+// ==================== KNOWLEDGE BASE ====================
+
+app.get('/api/v1/knowledge-base', requireAuth, (req, res) => {
+  const articles = [
+    {
+      id: 'kb-nist-ai-rmf', category: 'framework', title: 'NIST AI Risk Management Framework (AI RMF)',
+      summary: 'The NIST AI RMF provides a structured approach to managing AI risks through four core functions: Govern, Map, Measure, and Manage.',
+      content: 'The NIST AI RMF 1.0 establishes a voluntary framework for managing risks associated with AI systems throughout their lifecycle. It defines four core functions:\n\n**Govern** - Establish and maintain organizational AI governance structures, policies, and processes.\n**Map** - Categorize AI systems, identify stakeholders, and understand the context of AI deployment.\n**Measure** - Assess and monitor AI risks including performance, bias, security, and compliance.\n**Manage** - Implement risk mitigation strategies, monitor controls, and respond to incidents.\n\nForgeAI Govern maps 39 controls across these four families.',
+      frameworks: ['NIST AI RMF 1.0'], relevance: 'core',
+    },
+    {
+      id: 'kb-fda-samd', category: 'regulatory', title: 'FDA Software as Medical Device (SaMD) Classification',
+      summary: 'FDA regulates AI/ML-based Software as a Medical Device through pre-market pathways including 510(k), De Novo, and PMA.',
+      content: 'The FDA classifies AI/ML-enabled medical devices based on the significance of the information provided by the SaMD to the healthcare decision and the state of the healthcare situation or condition. Key pathways:\n\n**510(k)** - Demonstrates substantial equivalence to a predicate device. Most common pathway for moderate-risk AI tools.\n**De Novo** - For novel, low-to-moderate risk devices without a predicate. Increasingly used for AI-based diagnostic tools.\n**PMA** - Pre-Market Approval required for high-risk (Class III) devices.\n\nThe FDA Action Plan for AI/ML-Based SaMD introduces the concept of Predetermined Change Control Plans (PCCPs) to accommodate iterative model updates.',
+      frameworks: ['FDA SaMD', '21 CFR Part 820'], relevance: 'core',
+    },
+    {
+      id: 'kb-hipaa-ai', category: 'regulatory', title: 'HIPAA Compliance for AI Systems',
+      summary: 'AI systems processing Protected Health Information (PHI) must comply with HIPAA Privacy, Security, and Breach Notification Rules.',
+      content: 'When AI systems access or process PHI, HIPAA requirements apply:\n\n**Privacy Rule** - Establishes minimum necessary standards for PHI use. AI training data must be de-identified per Safe Harbor or Expert Determination methods.\n**Security Rule** - Requires administrative, physical, and technical safeguards for ePHI. AI systems must implement access controls, audit logging, encryption, and transmission security.\n**Breach Notification** - AI-related data breaches affecting PHI must be reported within 60 days.\n**Business Associate Agreements** - Required with AI vendors that process PHI on behalf of covered entities.\n\nForgeAI Govern tracks PHI access per AI system and maps relevant HIPAA controls.',
+      frameworks: ['HIPAA', '45 CFR Parts 160, 164'], relevance: 'core',
+    },
+    {
+      id: 'kb-onc-hti1', category: 'regulatory', title: 'ONC HTI-1 Final Rule - Decision Support Interventions',
+      summary: 'The ONC HTI-1 rule establishes transparency and risk management requirements for AI-enabled clinical decision support within certified health IT.',
+      content: 'The ONC Health Data, Technology, and Interoperability (HTI-1) Final Rule introduces requirements for Predictive Decision Support Interventions (DSIs) in certified health IT:\n\n**Source Attribute Transparency** - DSIs must disclose the intervention developer, funding source, and whether the output is based on a predictive model.\n**Risk Management Practices** - Developers must employ practices including bias analysis, validation studies, and ongoing performance monitoring.\n**Intervention Details** - Must be made available including intended use, training data characteristics, and known limitations.\n\nThese requirements align with ForgeAI Govern\'s AI asset metadata, bias testing, and transparency controls.',
+      frameworks: ['ONC HTI-1', '45 CFR Part 170'], relevance: 'core',
+    },
+    {
+      id: 'kb-risk-assessment', category: 'guide', title: 'How to Conduct an AI Risk Assessment',
+      summary: 'Step-by-step guide to evaluating AI system risk across 6 dimensions using the ForgeAI weighted scoring model.',
+      content: 'ForgeAI Govern uses a 6-dimension weighted risk model:\n\n1. **Patient Safety (25%)** - Potential for direct patient harm from incorrect outputs. Score 5 if errors could cause mortality.\n2. **Bias & Fairness (20%)** - Risk of disparate impact across demographic groups. Test with representative populations.\n3. **Data Privacy (15%)** - PHI exposure risk, data minimization compliance, de-identification effectiveness.\n4. **Clinical Validity (15%)** - Scientific evidence supporting the AI\'s clinical claims. Peer-reviewed validation studies.\n5. **Cybersecurity (15%)** - Attack surface, model poisoning risk, adversarial robustness, API security.\n6. **Regulatory (10%)** - Compliance gaps with FDA, HIPAA, state laws, and organizational policies.\n\n**Overall Risk Calculation:**\n- Critical: weighted score >= 4.0 OR patient safety = 5\n- High: weighted score >= 3.0\n- Moderate: weighted score >= 2.0\n- Low: weighted score < 2.0',
+      frameworks: ['NIST AI RMF', 'FDA SaMD'], relevance: 'guide',
+    },
+    {
+      id: 'kb-vendor-due-diligence', category: 'guide', title: 'AI Vendor Due Diligence Best Practices',
+      summary: 'Framework for evaluating third-party AI vendors on transparency, bias testing, security, data practices, and contractual provisions.',
+      content: 'When evaluating AI vendors, assess these 5 dimensions:\n\n1. **Transparency (15%)** - Model architecture disclosure, training data documentation, algorithm explainability.\n2. **Bias Testing (25%)** - Demographic testing methodology, results disaggregation, disparate impact analysis.\n3. **Security (25%)** - SOC 2 compliance, encryption standards, penetration testing, vulnerability management.\n4. **Data Practices (20%)** - Data handling policies, PHI protections, data retention/deletion, sub-processor agreements.\n5. **Contractual (15%)** - Audit rights, SLAs, performance guarantees, liability provisions, exit clauses.\n\n**Scoring:** Each dimension rated 1-5, weighted to produce a 0-100 overall score. Scores below 40 are rejected, 40-60 conditional, above 60 approved.',
+      frameworks: ['NIST AI RMF', 'HIPAA BAA'], relevance: 'guide',
+    },
+    {
+      id: 'kb-incident-response', category: 'guide', title: 'AI Incident Response Playbook',
+      summary: 'Procedures for responding to AI-related incidents including patient safety events, bias detection, and model failures.',
+      content: 'ForgeAI Govern supports structured incident response:\n\n**Severity Levels:**\n- **Critical** - Patient safety impact or data breach. Triggers automatic system suspension.\n- **High** - Significant performance degradation or bias detected. Requires 24-hour response.\n- **Moderate** - Notable drift or minor compliance gaps. Requires 72-hour review.\n- **Low** - Informational findings or minor anomalies. Tracked for pattern analysis.\n\n**Response Steps:**\n1. Report incident with severity classification\n2. For critical/patient safety: system auto-suspended pending investigation\n3. Assign investigation team and document root cause\n4. Implement corrective actions with evidence\n5. Review and close with audit trail\n6. Update risk assessment based on findings',
+      frameworks: ['NIST AI RMF Manage', 'HIPAA Breach Notification'], relevance: 'guide',
+    },
+  ];
+
+  const { category: cat, search } = req.query;
+  let filtered = articles;
+  if (cat) filtered = filtered.filter(a => a.category === cat);
+  if (search) {
+    const term = search.toLowerCase();
+    filtered = filtered.filter(a => a.title.toLowerCase().includes(term) || a.summary.toLowerCase().includes(term) || a.content.toLowerCase().includes(term));
+  }
+  res.json({ data: filtered });
+});
+
+// ==================== API DOCUMENTATION ====================
+
+app.get('/api/v1/docs', (req, res) => {
+  const docs = {
+    title: 'ForgeAI Govern API',
+    version: '1.0.0',
+    description: 'Healthcare AI Governance Platform REST API',
+    base_url: '/api/v1',
+    authentication: {
+      type: 'Bearer Token (JWT)',
+      header: 'Authorization: Bearer <token>',
+      token_expiry: '15 minutes',
+      refresh: 'POST /api/v1/auth/refresh with refresh_token',
+    },
+    rate_limits: {
+      global: '200 requests/minute per IP',
+      auth: '10 attempts/15 minutes per IP',
+    },
+    endpoints: [
+      { method: 'GET', path: '/health', auth: false, description: 'Health check' },
+      { method: 'POST', path: '/auth/register', auth: false, description: 'Register organization', body: 'organization_name, email, password, first_name, last_name' },
+      { method: 'POST', path: '/auth/login', auth: false, description: 'Sign in', body: 'email, password' },
+      { method: 'POST', path: '/auth/refresh', auth: false, description: 'Refresh access token', body: 'refresh_token' },
+      { method: 'GET', path: '/ai-assets', auth: true, description: 'List AI assets', query: 'page, limit, category, risk_tier, status, search' },
+      { method: 'GET', path: '/ai-assets/:id', auth: true, description: 'Get AI asset detail' },
+      { method: 'POST', path: '/ai-assets', auth: true, description: 'Register AI asset', roles: 'admin, governance_lead' },
+      { method: 'PUT', path: '/ai-assets/:id', auth: true, description: 'Update AI asset', roles: 'admin, governance_lead, reviewer' },
+      { method: 'DELETE', path: '/ai-assets/:id', auth: true, description: 'Decommission AI asset', roles: 'admin' },
+      { method: 'GET', path: '/risk-assessments', auth: true, description: 'List risk assessments', query: 'ai_asset_id' },
+      { method: 'POST', path: '/risk-assessments', auth: true, description: 'Create risk assessment', roles: 'admin, governance_lead, reviewer' },
+      { method: 'PUT', path: '/risk-assessments/:id', auth: true, description: 'Update risk assessment' },
+      { method: 'POST', path: '/risk-assessments/:id/approve', auth: true, description: 'Approve/reject assessment', roles: 'admin, governance_lead' },
+      { method: 'GET', path: '/impact-assessments', auth: true, description: 'List impact assessments', query: 'ai_asset_id' },
+      { method: 'POST', path: '/impact-assessments', auth: true, description: 'Create impact assessment' },
+      { method: 'PUT', path: '/impact-assessments/:id', auth: true, description: 'Update impact assessment' },
+      { method: 'GET', path: '/controls', auth: true, description: 'List compliance controls', query: 'family, search' },
+      { method: 'GET', path: '/implementations', auth: true, description: 'List control implementations', query: 'ai_asset_id, status' },
+      { method: 'POST', path: '/implementations', auth: true, description: 'Record control implementation' },
+      { method: 'GET', path: '/vendor-assessments', auth: true, description: 'List vendor assessments' },
+      { method: 'POST', path: '/vendor-assessments', auth: true, description: 'Create vendor assessment' },
+      { method: 'PUT', path: '/vendor-assessments/:id', auth: true, description: 'Update vendor assessment' },
+      { method: 'GET', path: '/incidents', auth: true, description: 'List incidents', query: 'status, severity, ai_asset_id' },
+      { method: 'POST', path: '/incidents', auth: true, description: 'Report incident' },
+      { method: 'PUT', path: '/incidents/:id', auth: true, description: 'Update incident' },
+      { method: 'GET', path: '/evidence', auth: true, description: 'List evidence', query: 'entity_type, entity_id' },
+      { method: 'POST', path: '/evidence', auth: true, description: 'Add evidence' },
+      { method: 'DELETE', path: '/evidence/:id', auth: true, description: 'Delete evidence' },
+      { method: 'GET', path: '/support-tickets', auth: true, description: 'List support tickets (own or all for admin)' },
+      { method: 'POST', path: '/support-tickets', auth: true, description: 'Create support ticket' },
+      { method: 'PUT', path: '/support-tickets/:id', auth: true, description: 'Update support ticket' },
+      { method: 'GET', path: '/feature-requests', auth: true, description: 'List feature requests', query: 'status, category, sort' },
+      { method: 'POST', path: '/feature-requests', auth: true, description: 'Submit feature request' },
+      { method: 'POST', path: '/feature-requests/:id/vote', auth: true, description: 'Toggle vote on feature request' },
+      { method: 'PUT', path: '/feature-requests/:id', auth: true, description: 'Update feature request status', roles: 'admin' },
+      { method: 'GET', path: '/knowledge-base', auth: true, description: 'Get knowledge base articles', query: 'category, search' },
+      { method: 'GET', path: '/onboarding/progress', auth: true, description: 'Get onboarding checklist progress' },
+      { method: 'GET', path: '/dashboard/stats', auth: true, description: 'Dashboard statistics' },
+      { method: 'GET', path: '/reports/compliance', auth: true, description: 'Compliance summary report' },
+      { method: 'GET', path: '/reports/executive', auth: true, description: 'Executive summary report' },
+      { method: 'GET', path: '/export/:type', auth: true, description: 'Export data as CSV (assets, risk-assessments, compliance, vendor-assessments, incidents, evidence)' },
+      { method: 'GET', path: '/users', auth: true, description: 'List users', roles: 'admin' },
+      { method: 'POST', path: '/users', auth: true, description: 'Create user', roles: 'admin' },
+      { method: 'PUT', path: '/users/:id', auth: true, description: 'Update user', roles: 'admin' },
+      { method: 'GET', path: '/audit-log', auth: true, description: 'View audit log', roles: 'admin' },
+      { method: 'GET', path: '/docs', auth: false, description: 'This API documentation' },
+    ],
+  };
+  res.json(docs);
 });
 
 // ==================== EXPORT ====================
