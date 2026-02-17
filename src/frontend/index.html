@@ -89,6 +89,9 @@
                     <span class="nav-title">ForgeAI Govern<sup>™</sup></span>
                 </div>
                 <div class="nav-right">
+                    <button id="notif-bell" class="notif-bell" onclick="Pages.showNotifications()" title="Notifications">
+                        &#9954;<span id="notif-badge" class="notif-badge hidden">0</span>
+                    </button>
                     <span id="user-info" class="user-info"></span>
                     <button id="logout-btn" class="btn btn-sm btn-outline">Sign Out</button>
                 </div>
@@ -136,8 +139,14 @@
                     <li class="nav-item" data-page="feature-requests">
                         <span class="nav-icon">&#9733;</span> Feature Requests
                     </li>
+                    <li class="nav-item" data-page="training">
+                        <span class="nav-icon">&#9998;</span> Training
+                    </li>
                     <li class="nav-item admin-only" data-page="users">
                         <span class="nav-icon">&#9823;</span> User Management
+                    </li>
+                    <li class="nav-item admin-only" data-page="ops-dashboard">
+                        <span class="nav-icon">&#9878;</span> Ops Dashboard
                     </li>
                     <li class="nav-item admin-only" data-page="audit-log">
                         <span class="nav-icon">&#9776;</span> Audit Log

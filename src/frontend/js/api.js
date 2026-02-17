@@ -241,4 +241,34 @@ const API = {
     const qs = new URLSearchParams(params).toString();
     return this.request('GET', `/knowledge-base${qs ? '?' + qs : ''}`);
   },
+
+  // --- Notifications ---
+  getNotifications(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/notifications${qs ? '?' + qs : ''}`);
+  },
+  markNotificationRead(id) { return this.request('PUT', `/notifications/${id}/read`); },
+  markAllNotificationsRead() { return this.request('POST', '/notifications/read-all'); },
+
+  // --- Training ---
+  getTrainingModules(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request('GET', `/training/modules${qs ? '?' + qs : ''}`);
+  },
+  getTrainingModule(id) { return this.request('GET', `/training/modules/${id}`); },
+  completeTrainingModule(id, body = {}) { return this.request('POST', `/training/modules/${id}/complete`, body); },
+  getTrainingProgress() { return this.request('GET', '/training/progress'); },
+
+  // --- Operations ---
+  getOpsMetrics() { return this.request('GET', '/ops/metrics'); },
+  getTenantHealth() { return this.request('GET', '/ops/tenant-health'); },
+
+  // --- Audit Reports ---
+  getAuditPack(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return `${this.baseUrl}/reports/audit-pack${qs ? '?' + qs : ''}`;
+  },
+  getAssetProfile(id) {
+    return `${this.baseUrl}/reports/asset-profile/${id}`;
+  },
 };

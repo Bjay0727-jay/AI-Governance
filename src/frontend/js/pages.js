@@ -1074,6 +1074,260 @@ const Pages = {
     } catch (err) { App.toast(err.message, 'error'); }
   },
 
+  // ==================== NOTIFICATIONS ====================
+  async showNotifications() {
+    try {
+      const data = await API.getNotifications({ limit: '30' });
+      App.openModal('Notifications', `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:13px;color:var(--text-muted)">${data.unread_count} unread</span>
+          ${data.unread_count > 0 ? `<button class="btn btn-sm btn-outline" onclick="Pages.markAllRead()">Mark All Read</button>` : ''}
+        </div>
+        <div class="notif-list">
+          ${data.data.length > 0 ? data.data.map(n => `
+            <div class="notif-item ${n.read ? '' : 'unread'}" onclick="Pages.readNotification('${n.id}')">
+              <div class="notif-icon notif-${n.type}">${n.type === 'success' ? '&#10003;' : n.type === 'warning' ? '&#9888;' : n.type === 'danger' ? '&#10007;' : '&#9432;'}</div>
+              <div class="notif-content">
+                <strong>${n.title}</strong>
+                <p style="margin:2px 0 0;font-size:12px;color:var(--text-secondary)">${n.message}</p>
+                <span style="font-size:11px;color:var(--text-muted)">${App.formatDate(n.created_at)}</span>
+              </div>
+            </div>
+          `).join('') : '<p style="text-align:center;color:var(--text-muted);padding:20px">No notifications</p>'}
+        </div>
+      `, '');
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  async readNotification(id) {
+    try {
+      await API.markNotificationRead(id);
+      const items = document.querySelectorAll('.notif-item');
+      items.forEach(el => { if (el.getAttribute('onclick')?.includes(id)) el.classList.remove('unread'); });
+      App.pollNotifications();
+    } catch (e) { /* ignore */ }
+  },
+
+  async markAllRead() {
+    try {
+      await API.markAllNotificationsRead();
+      App.closeModal();
+      App.pollNotifications();
+      App.toast('All notifications marked as read', 'success');
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ==================== TRAINING ====================
+  async training() {
+    let modules = { data: [] };
+    let progress = { data: { total_modules: 0, completed_modules: 0, completion_percentage: 0, average_score: 0, completions: [] } };
+    try {
+      [modules, progress] = await Promise.all([
+        API.getTrainingModules(),
+        API.getTrainingProgress(),
+      ]);
+    } catch (e) { /* empty */ }
+
+    const p = progress.data;
+    const categoryLabels = { platform: 'Platform', governance: 'Governance', compliance: 'Compliance', regulatory: 'Regulatory' };
+
+    return `
+      <div class="page-header">
+        <div><h2>Training Center</h2><p>Complete training modules to build your AI governance expertise</p></div>
+      </div>
+      <div class="stats-row" style="grid-template-columns: repeat(4, 1fr)">
+        <div class="stat-card info"><div class="stat-value">${p.total_modules}</div><div class="stat-label">Total Modules</div></div>
+        <div class="stat-card success"><div class="stat-value">${p.completed_modules}</div><div class="stat-label">Completed</div></div>
+        <div class="stat-card warning"><div class="stat-value">${p.completion_percentage}%</div><div class="stat-label">Progress</div></div>
+        <div class="stat-card"><div class="stat-value">${p.average_score || '—'}</div><div class="stat-label">Avg Score</div></div>
+      </div>
+      <div class="onboarding-progress-bar" style="margin-bottom:24px">
+        <div class="onboarding-track"><div class="onboarding-fill" style="width:${p.completion_percentage}%"></div></div>
+        <span class="onboarding-pct">${p.completion_percentage}%</span>
+      </div>
+      <div class="training-modules">
+        ${modules.data.map(m => `
+          <div class="card training-card" style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  ${m.completed ? '<span style="color:var(--success);font-size:18px">&#10003;</span>' : '<span style="color:var(--text-muted);font-size:18px">&#9675;</span>'}
+                  <h3 style="margin:0">${m.title}</h3>
+                </div>
+                <p style="color:var(--text-secondary);font-size:13px;margin:4px 0">${m.description}</p>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+                  <span class="badge badge-info">${categoryLabels[m.category] || m.category}</span>
+                  <span style="font-size:11px;color:var(--text-muted)">${m.duration_minutes} min</span>
+                  ${m.completed ? `<span style="font-size:11px;color:var(--success)">Completed ${App.formatDate(m.completion_data?.completed_at)}</span>` : ''}
+                </div>
+              </div>
+              <button class="btn btn-sm ${m.completed ? 'btn-outline' : 'btn-primary'}" onclick="Pages.viewTrainingModule('${m.id}')">
+                ${m.completed ? 'Review' : 'Start'}
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+  },
+
+  async viewTrainingModule(moduleId) {
+    try {
+      const { data: m } = await API.getTrainingModule(moduleId);
+      const contentHtml = m.content.split('\\n').map(line => {
+        const formatted = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        if (line.startsWith('- ')) return `<li>${formatted.slice(2)}</li>`;
+        return formatted ? `<p>${formatted}</p>` : '';
+      }).join('');
+
+      App.openModal(m.title, `
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+          <span class="badge badge-info">${m.category}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${m.duration_minutes} minutes</span>
+          ${m.completed ? '<span class="badge badge-low">Completed</span>' : ''}
+        </div>
+        <div class="kb-body" style="max-height:400px;overflow-y:auto;padding-right:8px">
+          ${contentHtml}
+        </div>
+      `, m.completed ? '' :
+        '<button class="btn btn-primary" id="tm-complete">Mark as Completed</button>');
+
+      if (!m.completed) {
+        document.getElementById('tm-complete')?.addEventListener('click', async () => {
+          try {
+            await API.completeTrainingModule(moduleId, { score: 100 });
+            App.closeModal();
+            App.toast('Module completed!', 'success');
+            App.navigate('training');
+          } catch (err) { App.toast(err.message, 'error'); }
+        });
+      }
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ==================== OPS DASHBOARD ====================
+  async opsDashboard() {
+    let metrics = { data: { totals: {}, activity_7d: [], users_by_role: [], assets_by_risk: [], active_users_30d: 0 } };
+    let health = { data: { health_score: 0, health_grade: 'F', coverage: {}, alerts: [], overdue_assessments: 0, critical_incidents: 0 } };
+    try {
+      [metrics, health] = await Promise.all([
+        API.getOpsMetrics(),
+        API.getTenantHealth(),
+      ]);
+    } catch (e) { /* empty */ }
+
+    const t = metrics.data.totals;
+    const h = health.data;
+    const gradeColors = { A: 'var(--success)', B: 'var(--accent)', C: 'var(--warning)', D: '#f97316', F: 'var(--danger)' };
+
+    return `
+      <div class="page-header">
+        <div><h2>Operations Dashboard</h2><p>Platform health, usage metrics, and governance coverage</p></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card" style="border-left:4px solid ${gradeColors[h.health_grade] || 'var(--border)'}">
+          <div class="stat-value" style="font-size:36px;color:${gradeColors[h.health_grade]}">${h.health_grade}</div>
+          <div class="stat-label">Health Grade (${h.health_score}/100)</div>
+        </div>
+        <div class="stat-card info"><div class="stat-value">${t.users || 0}</div><div class="stat-label">Active Users</div></div>
+        <div class="stat-card success"><div class="stat-value">${t.assets || 0}</div><div class="stat-label">AI Assets</div></div>
+        <div class="stat-card warning"><div class="stat-value">${t.open_incidents || 0}</div><div class="stat-label">Open Incidents</div></div>
+      </div>
+      ${h.alerts.length > 0 ? `
+      <div class="card" style="margin-bottom:16px;border-left:4px solid var(--warning)">
+        <div class="card-header"><h3>Alerts</h3></div>
+        ${h.alerts.map(a => `
+          <div class="alert-item">
+            <div class="alert-severity ${a.type}"></div>
+            <div class="alert-text">${a.message}</div>
+          </div>
+        `).join('')}
+      </div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+        <div class="card">
+          <div class="card-header"><h3>Governance Coverage</h3></div>
+          <div style="padding:8px 0">
+            ${Object.entries(h.coverage).map(([key, val]) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+                <span style="font-size:13px">${key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase())}</span>
+                <span style="font-size:14px;font-weight:700;color:${val ? 'var(--success)' : 'var(--danger)'}">${val ? '&#10003;' : '&#10007;'}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Platform Totals</h3></div>
+          <div style="padding:8px 0">
+            ${[
+              ['Risk Assessments', t.risk_assessments],
+              ['Impact Assessments', t.impact_assessments],
+              ['Vendor Assessments', t.vendors],
+              ['Evidence Records', t.evidence],
+              ['Support Tickets', t.tickets],
+              ['Open Tickets', t.open_tickets],
+              ['Audit Log Entries', t.audit_entries],
+            ].map(([label, val]) => `
+              <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                <span style="font-size:13px">${label}</span><span style="font-weight:700">${val || 0}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Users by Role</h3></div>
+          ${metrics.data.users_by_role.map(r => `
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+              <span style="font-size:13px">${App.badge(r.role)}</span><span style="font-weight:700">${r.count}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Assets by Risk Tier</h3></div>
+          ${metrics.data.assets_by_risk.map(r => `
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+              <span>${App.badge(r.risk_tier)}</span><span style="font-weight:700">${r.count}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3>Audit-Ready Reports</h3></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px">
+          <div class="export-card card" style="text-align:center;padding:16px;cursor:pointer" onclick="Pages.openAuditReport('all')">
+            <div style="font-size:28px">&#9744;</div><strong>Full Compliance Pack</strong>
+            <p style="font-size:12px;color:var(--text-secondary)">All frameworks</p>
+          </div>
+          <div class="export-card card" style="text-align:center;padding:16px;cursor:pointer" onclick="Pages.openAuditReport('nist')">
+            <div style="font-size:28px">&#9878;</div><strong>NIST AI RMF Pack</strong>
+            <p style="font-size:12px;color:var(--text-secondary)">NIST controls only</p>
+          </div>
+          <div class="export-card card" style="text-align:center;padding:16px;cursor:pointer" onclick="Pages.openAuditReport('hipaa')">
+            <div style="font-size:28px">&#9829;</div><strong>HIPAA Pack</strong>
+            <p style="font-size:12px;color:var(--text-secondary)">HIPAA controls only</p>
+          </div>
+        </div>
+      </div>`;
+  },
+
+  openAuditReport(framework) {
+    const url = framework === 'all'
+      ? '/api/v1/reports/audit-pack'
+      : `/api/v1/reports/audit-pack?framework=${framework}`;
+    const win = window.open('', '_blank');
+    fetch(url, { headers: { 'Authorization': `Bearer ${API.accessToken}` } })
+      .then(r => r.text())
+      .then(html => { win.document.write(html); win.document.close(); })
+      .catch(() => { win.close(); App.toast('Failed to generate report', 'error'); });
+  },
+
+  openAssetProfile(assetId) {
+    const url = `/api/v1/reports/asset-profile/${assetId}`;
+    const win = window.open('', '_blank');
+    fetch(url, { headers: { 'Authorization': `Bearer ${API.accessToken}` } })
+      .then(r => r.text())
+      .then(html => { win.document.write(html); win.document.close(); })
+      .catch(() => { win.close(); App.toast('Failed to generate report', 'error'); });
+  },
+
   // ==================== CONTEXTUAL HELP ====================
   showHelp(topic) {
     const helpContent = {
