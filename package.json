@@ -1,0 +1,40 @@
+{
+  "name": "forgeai-govern",
+  "version": "1.0.0",
+  "description": "ForgeAI Govern™ - Healthcare AI Governance Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:verbose": "jest --forceExit --detectOpenHandles --verbose",
+    "test:coverage": "jest --forceExit --detectOpenHandles --coverage",
+    "setup": "node scripts/setup-db.js",
+    "seed": "node scripts/seed-demo.js",
+    "deploy:cf": "wrangler deploy",
+    "db:init:cf": "wrangler d1 execute forgeai-govern-db --file=src/database/schema.sql",
+    "db:seed:cf": "wrangler d1 execute forgeai-govern-db --file=src/database/seed.sql"
+  },
+  "keywords": [
+    "ai-governance",
+    "healthcare",
+    "compliance",
+    "nist-ai-rmf",
+    "hipaa"
+  ],
+  "author": "Forge Cyber Defense",
+  "license": "PROPRIETARY",
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "csrf-csrf": "^4.0.3",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "supertest": "^7.2.2"
+  }
+}

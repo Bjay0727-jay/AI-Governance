@@ -1,0 +1,158 @@
+{
+  "crosswalk": "Healthcare AI Regulatory Cross-Framework Mapping",
+  "version": "1.0",
+  "last_updated": "2025-02",
+  "frameworks": {
+    "nist_ai_rmf": {
+      "name": "NIST AI Risk Management Framework 1.0",
+      "publisher": "National Institute of Standards and Technology",
+      "type": "Federal Guidance (Voluntary)",
+      "healthcare_companion": "NIST AI 600-1"
+    },
+    "fda_samd": {
+      "name": "FDA Framework for AI/ML-Based Software as a Medical Device",
+      "publisher": "Food and Drug Administration",
+      "type": "Federal Regulation (Mandatory for SaMD)"
+    },
+    "onc_hti1": {
+      "name": "ONC Health IT Certification (HTI-1 Final Rule)",
+      "publisher": "Office of the National Coordinator for Health IT",
+      "type": "Federal Regulation (Mandatory for Certified Health IT)"
+    },
+    "hipaa": {
+      "name": "HIPAA Privacy and Security Rules",
+      "publisher": "Department of Health and Human Services",
+      "type": "Federal Regulation (Mandatory)"
+    },
+    "state_laws": {
+      "colorado": {
+        "name": "Colorado AI Act (SB 21-169)",
+        "requirements": ["Algorithmic impact assessments", "Bias testing", "Consumer notification"]
+      },
+      "california": {
+        "name": "California AI Transparency Bills",
+        "requirements": ["Transparency requirements", "Automated decision-making disclosures"]
+      },
+      "illinois": {
+        "name": "Illinois AI Video Interview Act",
+        "requirements": ["Consent and transparency for AI in employment"]
+      },
+      "connecticut": {
+        "name": "Connecticut SB 1103",
+        "requirements": ["Inventory requirements", "Impact assessments"]
+      },
+      "new_york_city": {
+        "name": "NYC Local Law 144",
+        "requirements": ["Bias audits for automated employment decision tools"]
+      }
+    },
+    "joint_commission": {
+      "name": "Joint Commission Standards",
+      "publisher": "The Joint Commission",
+      "type": "Accreditation Standards"
+    }
+  },
+  "mapping": [
+    {
+      "governance_area": "AI Oversight & Accountability",
+      "nist_ai_rmf": "GOVERN 1.1-1.5",
+      "fda_samd": "Quality Management System",
+      "onc_hti1": null,
+      "hipaa": "§164.308(a)(2) - Assigned Security Responsibility",
+      "colorado": "Sec 3 - Governance Requirements",
+      "joint_commission": "LD.04.04.01"
+    },
+    {
+      "governance_area": "AI System Inventory",
+      "nist_ai_rmf": "MAP 1.1-1.2",
+      "fda_samd": "Device Registration (510(k), De Novo, PMA)",
+      "onc_hti1": "§170.315(b)(11) - DSI Transparency",
+      "hipaa": "§164.310(d)(1) - Device and Media Controls",
+      "connecticut": "SB 1103 Sec 3 - Inventory Requirements",
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Risk Assessment",
+      "nist_ai_rmf": "MEASURE 1.1-1.2",
+      "fda_samd": "Clinical Evaluation",
+      "onc_hti1": "§170.315(b)(11)(iv) - Performance",
+      "hipaa": "§164.308(a)(1)(ii)(A) - Risk Analysis",
+      "colorado": "SB 21-169 Sec 4(a) - Impact Assessment",
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Bias & Fairness Testing",
+      "nist_ai_rmf": "MEASURE 2.1-2.3",
+      "fda_samd": "Performance Testing",
+      "onc_hti1": "§170.315(b)(11)(v) - Fairness",
+      "hipaa": null,
+      "colorado": "SB 21-169 Sec 4(b) - Bias Testing",
+      "new_york_city": "Local Law 144 - Bias Audits",
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Continuous Monitoring",
+      "nist_ai_rmf": "MEASURE 2.3, MANAGE 3.1",
+      "fda_samd": "Post-Market Surveillance",
+      "onc_hti1": null,
+      "hipaa": null,
+      "colorado": null,
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Transparency & Explainability",
+      "nist_ai_rmf": "MANAGE 4.2",
+      "fda_samd": "Labeling Requirements",
+      "onc_hti1": "§170.315(b)(11)(i-iii) - Source Attributes",
+      "hipaa": null,
+      "colorado": "SB 21-169 Sec 6 - Consumer Notification",
+      "california": "AB-2013 Sec 3 - Disclosure Requirements",
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Data Privacy & Security",
+      "nist_ai_rmf": "MANAGE 1.2",
+      "fda_samd": "Cybersecurity Requirements",
+      "onc_hti1": null,
+      "hipaa": "§164.502(b) - Minimum Necessary, §164.312 - Technical Safeguards",
+      "colorado": null,
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Vendor Management",
+      "nist_ai_rmf": "MANAGE 1.1",
+      "fda_samd": "Supplier Controls",
+      "onc_hti1": null,
+      "hipaa": "§164.308(b)(1) - Business Associate Contracts",
+      "colorado": null,
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Incident Response",
+      "nist_ai_rmf": "MANAGE 3.1",
+      "fda_samd": "Complaint Handling / MDR",
+      "onc_hti1": null,
+      "hipaa": "§164.308(a)(6) - Security Incident Procedures",
+      "colorado": null,
+      "joint_commission": "PI.01.01.01"
+    },
+    {
+      "governance_area": "Change Control",
+      "nist_ai_rmf": "MANAGE 2.1",
+      "fda_samd": "Predetermined Change Control Plan",
+      "onc_hti1": null,
+      "hipaa": null,
+      "colorado": null,
+      "joint_commission": null
+    },
+    {
+      "governance_area": "Audit & Documentation",
+      "nist_ai_rmf": "MANAGE 4.3",
+      "fda_samd": "Record Keeping (21 CFR Part 820)",
+      "onc_hti1": null,
+      "hipaa": "§164.312(b) - Audit Controls, §164.316 - Documentation",
+      "colorado": null,
+      "joint_commission": null
+    }
+  ]
+}

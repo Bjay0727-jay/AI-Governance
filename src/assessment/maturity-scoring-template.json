@@ -1,0 +1,521 @@
+{
+  "framework": "Forge Healthcare AI Governance Maturity Model",
+  "version": "1.0",
+  "aligned_with": ["NIST AI RMF 1.0", "NIST AI 600-1 Healthcare Companion"],
+  "maturity_levels": {
+    "1": {
+      "name": "Initial",
+      "description": "No formal governance. AI adopted ad hoc without oversight or documentation."
+    },
+    "2": {
+      "name": "Developing",
+      "description": "Awareness exists. Some informal processes, but inconsistent application."
+    },
+    "3": {
+      "name": "Defined",
+      "description": "Formal policies and processes established. Consistent but manual execution."
+    },
+    "4": {
+      "name": "Managed",
+      "description": "Automated governance workflows. Systematic monitoring and measurement."
+    },
+    "5": {
+      "name": "Optimized",
+      "description": "Continuous improvement. AI governance integrated into enterprise risk management."
+    }
+  },
+  "domain_weights": {
+    "governance_structure": 0.15,
+    "ai_inventory": 0.15,
+    "risk_assessment": 0.20,
+    "policy_compliance": 0.15,
+    "monitoring_performance": 0.15,
+    "vendor_management": 0.10,
+    "transparency": 0.10
+  },
+  "domains": {
+    "governance_structure": {
+      "name": "Governance Structure & Oversight",
+      "nist_rmf_alignment": "GOVERN",
+      "criteria": [
+        {
+          "id": "GS-1",
+          "criterion": "AI governance committee exists with defined charter",
+          "level_1": "No committee or governance body for AI",
+          "level_2": "Informal group discusses AI occasionally",
+          "level_3": "Formal committee with charter and quarterly meetings",
+          "level_4": "Committee with defined decision authority and integrated escalation",
+          "level_5": "Committee embedded in enterprise governance with continuous improvement"
+        },
+        {
+          "id": "GS-2",
+          "criterion": "Cross-functional representation (CISO, CMIO, Legal, Compliance)",
+          "level_1": "No cross-functional involvement",
+          "level_2": "IT-only oversight of AI",
+          "level_3": "Core stakeholders represented (IT, Clinical, Compliance)",
+          "level_4": "Full cross-functional representation with dedicated roles",
+          "level_5": "Dynamic membership adapting to AI portfolio needs"
+        },
+        {
+          "id": "GS-3",
+          "criterion": "Regular meeting cadence (at least quarterly)",
+          "level_1": "No regular meetings",
+          "level_2": "Ad hoc meetings when issues arise",
+          "level_3": "Quarterly meetings with documented agendas",
+          "level_4": "Monthly meetings with action tracking",
+          "level_5": "Continuous engagement with real-time governance dashboards"
+        },
+        {
+          "id": "GS-4",
+          "criterion": "Defined escalation and decision authority",
+          "level_1": "No escalation paths defined",
+          "level_2": "Informal escalation based on relationships",
+          "level_3": "Documented escalation procedures",
+          "level_4": "Automated escalation with defined SLAs",
+          "level_5": "Risk-adaptive escalation integrated with incident response"
+        },
+        {
+          "id": "GS-5",
+          "criterion": "Board/C-suite reporting on AI governance",
+          "level_1": "No executive reporting",
+          "level_2": "Occasional mentions in broader technology reports",
+          "level_3": "Quarterly AI governance reports to C-suite",
+          "level_4": "Regular board-level reporting with risk metrics",
+          "level_5": "Real-time executive dashboards with predictive risk indicators"
+        },
+        {
+          "id": "GS-6",
+          "criterion": "Designated AI governance lead or CAIO role",
+          "level_1": "No designated AI governance responsibility",
+          "level_2": "AI governance added to existing role informally",
+          "level_3": "Formal AI governance lead designated",
+          "level_4": "Dedicated CAIO or equivalent with budget authority",
+          "level_5": "CAIO with enterprise authority and strategic mandate"
+        },
+        {
+          "id": "GS-7",
+          "criterion": "Budget allocated for AI governance activities",
+          "level_1": "No dedicated budget",
+          "level_2": "Ad hoc funding from general IT budget",
+          "level_3": "Defined annual AI governance budget",
+          "level_4": "Multi-year budget with staffing plan",
+          "level_5": "Strategic investment aligned with AI portfolio growth"
+        }
+      ]
+    },
+    "ai_inventory": {
+      "name": "AI Inventory & Classification",
+      "nist_rmf_alignment": "MAP",
+      "criteria": [
+        {
+          "id": "INV-1",
+          "criterion": "Comprehensive AI asset inventory maintained",
+          "level_1": "No inventory of AI systems",
+          "level_2": "Partial list known informally",
+          "level_3": "Centralized registry with core metadata",
+          "level_4": "Automated discovery and registry with full metadata",
+          "level_5": "Living inventory with real-time updates and automated vendor AI detection"
+        },
+        {
+          "id": "INV-2",
+          "criterion": "AI systems classified by risk tier",
+          "level_1": "No risk classification",
+          "level_2": "Informal risk awareness",
+          "level_3": "Tiered classification using documented criteria",
+          "level_4": "Automated risk scoring with multi-dimensional assessment",
+          "level_5": "Dynamic risk classification adapting to performance and context changes"
+        },
+        {
+          "id": "INV-3",
+          "criterion": "Regulatory status tracked (FDA, ONC, etc.)",
+          "level_1": "Regulatory status unknown for AI systems",
+          "level_2": "FDA-cleared status known for some devices",
+          "level_3": "Full regulatory classification documented per system",
+          "level_4": "Automated regulatory mapping with compliance tracking",
+          "level_5": "Proactive regulatory monitoring with impact analysis for new regulations"
+        },
+        {
+          "id": "INV-4",
+          "criterion": "Data sources and PHI access documented",
+          "level_1": "Data flows for AI unknown",
+          "level_2": "General awareness of data sources",
+          "level_3": "Documented data sources and PHI access per system",
+          "level_4": "Data flow diagrams with automated PHI access monitoring",
+          "level_5": "Real-time data lineage tracking with privacy impact automation"
+        },
+        {
+          "id": "INV-5",
+          "criterion": "System ownership and clinical champion assigned",
+          "level_1": "No ownership assigned",
+          "level_2": "Informal ownership by deploying team",
+          "level_3": "Formal owner and clinical champion for each system",
+          "level_4": "Ownership integrated with performance accountability",
+          "level_5": "Dynamic ownership with succession planning and accountability metrics"
+        },
+        {
+          "id": "INV-6",
+          "criterion": "Vendor vs. internal AI clearly distinguished",
+          "level_1": "No distinction made",
+          "level_2": "Major vendor AI known, embedded AI untracked",
+          "level_3": "Clear categorization of vendor, internal, and embedded AI",
+          "level_4": "Detailed provenance tracking for all AI components",
+          "level_5": "Automated AI supply chain mapping with dependency analysis"
+        },
+        {
+          "id": "INV-7",
+          "criterion": "Inventory updated regularly (at least quarterly)",
+          "level_1": "No update process",
+          "level_2": "Annual or irregular updates",
+          "level_3": "Quarterly review cycle with documented updates",
+          "level_4": "Continuous updates triggered by procurement and deployment events",
+          "level_5": "Real-time inventory management integrated with IT asset management"
+        }
+      ]
+    },
+    "risk_assessment": {
+      "name": "Risk Assessment & Impact Analysis",
+      "nist_rmf_alignment": "MEASURE",
+      "criteria": [
+        {
+          "id": "RA-1",
+          "criterion": "Standardized AI risk assessment process exists",
+          "level_1": "No AI-specific risk assessment",
+          "level_2": "General IT risk assessment applied to AI",
+          "level_3": "AI-specific risk assessment template in use",
+          "level_4": "Automated risk assessment workflows with scoring",
+          "level_5": "Continuous risk assessment with predictive risk analytics"
+        },
+        {
+          "id": "RA-2",
+          "criterion": "Multi-dimensional risk evaluation (safety, bias, privacy, cyber, regulatory)",
+          "level_1": "Single-dimension or no structured evaluation",
+          "level_2": "Two or three dimensions assessed informally",
+          "level_3": "All six dimensions systematically assessed",
+          "level_4": "Weighted multi-dimensional scoring with benchmarking",
+          "level_5": "Dynamic dimension weighting based on system context and population"
+        },
+        {
+          "id": "RA-3",
+          "criterion": "Pre-deployment risk assessment required for new AI",
+          "level_1": "No pre-deployment assessment requirement",
+          "level_2": "Assessment recommended but not enforced",
+          "level_3": "Mandatory pre-deployment assessment for all AI",
+          "level_4": "Automated gate in deployment pipeline requiring assessment",
+          "level_5": "Continuous assessment integrated into CI/CD with auto-blocking"
+        },
+        {
+          "id": "RA-4",
+          "criterion": "Algorithmic impact assessments conducted",
+          "level_1": "No algorithmic impact assessments",
+          "level_2": "Informal bias awareness discussions",
+          "level_3": "Structured AIA with documented methodology",
+          "level_4": "Automated AIA with demographic performance dashboards",
+          "level_5": "Continuous fairness monitoring with automated remediation triggers"
+        },
+        {
+          "id": "RA-5",
+          "criterion": "Bias testing across demographic groups performed",
+          "level_1": "No bias testing",
+          "level_2": "Vendor-reported bias data reviewed",
+          "level_3": "Local bias testing across major demographic categories",
+          "level_4": "Comprehensive disaggregated testing with statistical analysis",
+          "level_5": "Continuous bias monitoring with intersectional analysis"
+        },
+        {
+          "id": "RA-6",
+          "criterion": "Risk assessments documented and retained",
+          "level_1": "No documentation",
+          "level_2": "Informal notes or emails",
+          "level_3": "Standardized documentation in governance platform",
+          "level_4": "Version-controlled documentation with full audit trail",
+          "level_5": "Automated documentation with regulatory-ready reporting"
+        },
+        {
+          "id": "RA-7",
+          "criterion": "Risk tier determines governance rigor level",
+          "level_1": "Same (minimal) governance for all AI",
+          "level_2": "Awareness that some AI needs more oversight",
+          "level_3": "Defined governance requirements per risk tier",
+          "level_4": "Automated workflow routing based on risk tier",
+          "level_5": "Dynamic governance intensity based on real-time risk indicators"
+        }
+      ]
+    },
+    "policy_compliance": {
+      "name": "Policy & Compliance",
+      "nist_rmf_alignment": "GOVERN",
+      "criteria": [
+        {
+          "id": "PC-1",
+          "criterion": "AI acceptable use policy published and distributed",
+          "level_1": "No AI policy exists",
+          "level_2": "General technology policy mentions AI",
+          "level_3": "Dedicated AI acceptable use policy published",
+          "level_4": "Policy integrated into onboarding and annual attestation",
+          "level_5": "Adaptive policy updated quarterly based on AI landscape changes"
+        },
+        {
+          "id": "PC-2",
+          "criterion": "AI procurement/acquisition policy with AI-specific criteria",
+          "level_1": "No AI-specific procurement criteria",
+          "level_2": "Informal consideration of AI factors in procurement",
+          "level_3": "Formal AI criteria in procurement workflow",
+          "level_4": "Automated AI vendor assessment integrated in procurement",
+          "level_5": "Predictive vendor risk scoring with market intelligence"
+        },
+        {
+          "id": "PC-3",
+          "criterion": "Multi-framework compliance mapping maintained",
+          "level_1": "No compliance mapping",
+          "level_2": "Single framework awareness (e.g., HIPAA only)",
+          "level_3": "Documented crosswalk across major frameworks",
+          "level_4": "Automated compliance mapping with gap analysis",
+          "level_5": "Real-time compliance monitoring with regulatory change detection"
+        },
+        {
+          "id": "PC-4",
+          "criterion": "NIST AI RMF alignment documented",
+          "level_1": "Unaware of NIST AI RMF",
+          "level_2": "General awareness, no formal alignment",
+          "level_3": "Documented alignment with GOVERN, MAP, MEASURE, MANAGE",
+          "level_4": "Full implementation with evidence mapping",
+          "level_5": "Continuous alignment validation with automated reporting"
+        },
+        {
+          "id": "PC-5",
+          "criterion": "FDA SaMD requirements addressed where applicable",
+          "level_1": "FDA requirements not considered for AI",
+          "level_2": "Awareness of FDA oversight for medical devices",
+          "level_3": "FDA clearance status tracked and requirements documented",
+          "level_4": "Active FDA compliance management with change control",
+          "level_5": "Proactive FDA engagement with predetermined change control plans"
+        },
+        {
+          "id": "PC-6",
+          "criterion": "State AI legislation requirements mapped",
+          "level_1": "Unaware of state AI legislation",
+          "level_2": "Awareness of home state requirements only",
+          "level_3": "Multi-state requirements mapped to governance controls",
+          "level_4": "Automated state compliance tracking with alerts for new legislation",
+          "level_5": "Proactive state compliance with legislative monitoring service"
+        },
+        {
+          "id": "PC-7",
+          "criterion": "Policy review cycle established (at least annual)",
+          "level_1": "No policy review process",
+          "level_2": "Ad hoc review when issues arise",
+          "level_3": "Annual policy review cycle documented",
+          "level_4": "Semi-annual review with automated review triggers",
+          "level_5": "Continuous policy evolution based on regulatory and technology changes"
+        }
+      ]
+    },
+    "monitoring_performance": {
+      "name": "Monitoring & Performance",
+      "nist_rmf_alignment": "MEASURE",
+      "criteria": [
+        {
+          "id": "MON-1",
+          "criterion": "Performance monitoring active for deployed AI",
+          "level_1": "No monitoring of AI performance",
+          "level_2": "Manual, periodic performance checks",
+          "level_3": "Systematic monitoring with defined metrics",
+          "level_4": "Automated real-time monitoring dashboards",
+          "level_5": "Predictive monitoring with anomaly detection"
+        },
+        {
+          "id": "MON-2",
+          "criterion": "Key metrics defined and tracked (accuracy, precision, etc.)",
+          "level_1": "No metrics defined",
+          "level_2": "Basic accuracy tracked informally",
+          "level_3": "Standard metrics suite defined per AI type",
+          "level_4": "Comprehensive metrics with benchmarking",
+          "level_5": "Context-adaptive metrics with population-specific benchmarks"
+        },
+        {
+          "id": "MON-3",
+          "criterion": "Drift detection implemented",
+          "level_1": "No drift detection",
+          "level_2": "Manual comparison to original performance",
+          "level_3": "Statistical drift testing on scheduled basis",
+          "level_4": "Automated continuous drift monitoring",
+          "level_5": "Predictive drift detection with proactive retraining triggers"
+        },
+        {
+          "id": "MON-4",
+          "criterion": "Bias monitoring across demographic groups",
+          "level_1": "No bias monitoring",
+          "level_2": "Periodic manual fairness checks",
+          "level_3": "Regular disaggregated performance reporting",
+          "level_4": "Continuous automated fairness monitoring with alerts",
+          "level_5": "Real-time intersectional bias detection with auto-remediation"
+        },
+        {
+          "id": "MON-5",
+          "criterion": "Alerting thresholds established and active",
+          "level_1": "No alerting thresholds",
+          "level_2": "Informal awareness of performance degradation",
+          "level_3": "Defined thresholds with manual checking",
+          "level_4": "Automated alerts with escalation procedures",
+          "level_5": "Adaptive thresholds with predictive alerting"
+        },
+        {
+          "id": "MON-6",
+          "criterion": "Performance degradation response process exists",
+          "level_1": "No response process",
+          "level_2": "Ad hoc response to noticed issues",
+          "level_3": "Documented response procedures per risk tier",
+          "level_4": "Automated response workflows including auto-suspension",
+          "level_5": "Self-healing systems with human-in-the-loop oversight"
+        },
+        {
+          "id": "MON-7",
+          "criterion": "Regular governance reporting produced",
+          "level_1": "No governance reporting",
+          "level_2": "Ad hoc reports when requested",
+          "level_3": "Quarterly governance reports",
+          "level_4": "Monthly automated reports with trend analysis",
+          "level_5": "Real-time governance dashboards with predictive insights"
+        }
+      ]
+    },
+    "vendor_management": {
+      "name": "Vendor AI Management",
+      "nist_rmf_alignment": "MANAGE",
+      "criteria": [
+        {
+          "id": "VM-1",
+          "criterion": "AI-specific vendor assessment process exists",
+          "level_1": "No AI-specific vendor assessment",
+          "level_2": "General IT vendor assessment applied",
+          "level_3": "AI-specific questionnaire and scoring methodology",
+          "level_4": "Automated vendor assessment portal with scoring",
+          "level_5": "Continuous vendor monitoring with market intelligence"
+        },
+        {
+          "id": "VM-2",
+          "criterion": "Training data provenance evaluated",
+          "level_1": "Training data not considered",
+          "level_2": "General awareness of training data importance",
+          "level_3": "Provenance documentation required from vendors",
+          "level_4": "Independent verification of training data claims",
+          "level_5": "Continuous training data quality monitoring"
+        },
+        {
+          "id": "VM-3",
+          "criterion": "Vendor bias testing results reviewed",
+          "level_1": "Vendor bias data not requested",
+          "level_2": "Bias testing mentioned in vendor discussions",
+          "level_3": "Formal review of vendor-provided bias testing",
+          "level_4": "Independent validation of vendor bias claims",
+          "level_5": "Continuous vendor bias monitoring with contractual enforcement"
+        },
+        {
+          "id": "VM-4",
+          "criterion": "Model update practices assessed",
+          "level_1": "Vendor update practices unknown",
+          "level_2": "General awareness of vendor update approach",
+          "level_3": "Update practices documented and reviewed",
+          "level_4": "Update notifications with re-validation requirements",
+          "level_5": "Collaborative update governance with vendor partnerships"
+        },
+        {
+          "id": "VM-5",
+          "criterion": "Contractual AI provisions included (audit, SLAs)",
+          "level_1": "No AI-specific contractual provisions",
+          "level_2": "General IT SLAs applied",
+          "level_3": "AI-specific audit rights and performance SLAs",
+          "level_4": "Comprehensive AI governance provisions with enforcement",
+          "level_5": "Dynamic SLAs with performance-linked pricing"
+        },
+        {
+          "id": "VM-6",
+          "criterion": "Ongoing vendor performance monitoring",
+          "level_1": "No ongoing vendor monitoring",
+          "level_2": "Annual vendor review including AI",
+          "level_3": "Regular vendor performance reviews",
+          "level_4": "Continuous vendor monitoring with dashboards",
+          "level_5": "Predictive vendor risk management with market signals"
+        },
+        {
+          "id": "VM-7",
+          "criterion": "Vendor risk scoring methodology applied",
+          "level_1": "No vendor risk scoring",
+          "level_2": "Informal risk categorization",
+          "level_3": "Quantitative risk scoring methodology",
+          "level_4": "Automated multi-dimensional vendor risk scoring",
+          "level_5": "Dynamic vendor risk scoring with portfolio impact analysis"
+        }
+      ]
+    },
+    "transparency": {
+      "name": "Transparency & Explainability",
+      "nist_rmf_alignment": "MANAGE",
+      "criteria": [
+        {
+          "id": "TR-1",
+          "criterion": "Clinician-facing AI explanations provided",
+          "level_1": "No explanations provided to clinicians",
+          "level_2": "Basic vendor documentation available",
+          "level_3": "Structured explainability documentation per system",
+          "level_4": "Interactive explanations integrated into clinical workflow",
+          "level_5": "Personalized real-time explanations with confidence indicators"
+        },
+        {
+          "id": "TR-2",
+          "criterion": "Patient notification when AI influences care",
+          "level_1": "No patient notification",
+          "level_2": "General disclosure in consent forms",
+          "level_3": "Specific notification for high-risk AI use",
+          "level_4": "Systematic patient notification with opt-out capability",
+          "level_5": "Transparent AI disclosure integrated into patient engagement"
+        },
+        {
+          "id": "TR-3",
+          "criterion": "AI decision documentation standards defined",
+          "level_1": "No documentation standards",
+          "level_2": "AI outputs recorded in general notes",
+          "level_3": "Defined documentation standards per risk tier",
+          "level_4": "Automated documentation of AI-influenced decisions",
+          "level_5": "Complete decision provenance with reproducibility"
+        },
+        {
+          "id": "TR-4",
+          "criterion": "Explainability requirements proportional to risk",
+          "level_1": "No explainability requirements",
+          "level_2": "Awareness of explainability importance",
+          "level_3": "Tiered explainability standards defined",
+          "level_4": "Explainability validated during deployment approval",
+          "level_5": "Continuous explainability monitoring with user feedback integration"
+        },
+        {
+          "id": "TR-5",
+          "criterion": "Regulatory transparency requirements met",
+          "level_1": "Regulatory transparency requirements unknown",
+          "level_2": "General awareness of ONC HTI-1 requirements",
+          "level_3": "Systematic compliance with HTI-1 and state requirements",
+          "level_4": "Automated transparency compliance reporting",
+          "level_5": "Proactive transparency exceeding regulatory minimums"
+        },
+        {
+          "id": "TR-6",
+          "criterion": "AI training and education program for staff",
+          "level_1": "No AI training program",
+          "level_2": "Ad hoc training for specific AI tools",
+          "level_3": "Formal training program with role-based modules",
+          "level_4": "Continuous education with competency assessment",
+          "level_5": "AI literacy program integrated into professional development"
+        },
+        {
+          "id": "TR-7",
+          "criterion": "Incident reporting process includes AI-related events",
+          "level_1": "AI incidents not captured in reporting",
+          "level_2": "AI incidents reported through general channels",
+          "level_3": "Dedicated AI incident category in reporting system",
+          "level_4": "Automated AI incident detection and reporting",
+          "level_5": "Predictive incident detection with proactive intervention"
+        }
+      ]
+    }
+  }
+}

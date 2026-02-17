@@ -1,0 +1,155 @@
+{
+  "template": "Forge Healthcare AI Risk Assessment",
+  "version": "1.0",
+  "aligned_with": ["NIST AI RMF 1.0 MEASURE Function", "FDA SaMD Framework", "HIPAA Security Rule"],
+  "risk_dimensions": {
+    "patient_safety": {
+      "name": "Patient Safety",
+      "weight": 0.25,
+      "key_questions": [
+        "Could this tool cause harm through incorrect outputs?",
+        "What is the clinical severity of potential false positives/negatives?",
+        "Does the tool have appropriate failsafe mechanisms?",
+        "Is human oversight required for all clinical decisions?"
+      ],
+      "assessment_methods": ["Clinical validation studies", "Failure mode analysis", "Adverse event review"],
+      "scoring_criteria": {
+        "1": "Minimal patient interaction, no clinical decision impact",
+        "2": "Indirect clinical influence, low severity potential",
+        "3": "Moderate clinical influence, reversible harm potential",
+        "4": "Direct clinical influence, significant harm potential",
+        "5": "Life-critical decisions, irreversible harm potential"
+      }
+    },
+    "bias_fairness": {
+      "name": "Bias & Fairness",
+      "weight": 0.20,
+      "key_questions": [
+        "Does this tool perform equitably across demographic groups?",
+        "Was training data representative of our patient population?",
+        "Have disparate impact ratios been calculated?",
+        "Are there known demographic performance gaps?"
+      ],
+      "assessment_methods": ["Disaggregated performance metrics", "Disparate impact analysis", "Fairness testing"],
+      "scoring_criteria": {
+        "1": "No demographic performance variation, representative data",
+        "2": "Minor variations, well-documented and monitored",
+        "3": "Moderate disparities identified, remediation underway",
+        "4": "Significant disparities across key demographic groups",
+        "5": "Severe bias with potential for systematic discrimination"
+      },
+      "protected_categories": ["Race", "Ethnicity", "Gender", "Age", "Socioeconomic Status", "Insurance Type", "Language", "Disability Status"]
+    },
+    "data_privacy": {
+      "name": "Data Privacy",
+      "weight": 0.15,
+      "key_questions": [
+        "What PHI does this system access and how is it protected?",
+        "Is there a Business Associate Agreement in place?",
+        "Does data processing comply with minimum necessary standard?",
+        "Are data retention policies appropriate?"
+      ],
+      "assessment_methods": ["Privacy impact assessment", "Data flow mapping", "HIPAA compliance review"],
+      "scoring_criteria": {
+        "1": "No PHI access, anonymized data only",
+        "2": "Limited PHI access, strong controls, BAA in place",
+        "3": "Moderate PHI access, standard HIPAA controls",
+        "4": "Broad PHI access, complex data flows, third-party processing",
+        "5": "Extensive PHI access including sensitive categories, cross-border data flows"
+      }
+    },
+    "clinical_validity": {
+      "name": "Clinical Validity",
+      "weight": 0.15,
+      "key_questions": [
+        "Is this tool's accuracy validated for our patient population?",
+        "Are published performance metrics applicable to our context?",
+        "Has local validation been performed?",
+        "Are there peer-reviewed studies supporting this tool?"
+      ],
+      "assessment_methods": ["Local validation studies", "Literature review", "Clinical outcome correlation"],
+      "scoring_criteria": {
+        "1": "Extensive local validation, matches vendor claims",
+        "2": "Local validation shows good performance, minor gaps",
+        "3": "Vendor validation only, not yet locally validated",
+        "4": "Limited validation, significant uncertainty about local performance",
+        "5": "No validation, unproven clinical effectiveness"
+      }
+    },
+    "cybersecurity": {
+      "name": "Cybersecurity",
+      "weight": 0.15,
+      "key_questions": [
+        "What attack surfaces does this system introduce?",
+        "Is the system protected against adversarial inputs?",
+        "Are model extraction attacks mitigated?",
+        "Does the system meet NIST 800-53 control requirements?"
+      ],
+      "assessment_methods": ["Threat modeling", "Penetration testing", "NIST 800-53 control assessment"],
+      "scoring_criteria": {
+        "1": "Minimal attack surface, strong security controls, FedRAMP authorized",
+        "2": "Limited attack surface, standard security controls in place",
+        "3": "Moderate attack surface, baseline security controls",
+        "4": "Broad attack surface, gaps in security controls identified",
+        "5": "Extensive attack surface, significant security vulnerabilities"
+      }
+    },
+    "regulatory": {
+      "name": "Regulatory Compliance",
+      "weight": 0.10,
+      "key_questions": [
+        "What regulations apply and are we compliant?",
+        "Is FDA clearance required and obtained?",
+        "Are ONC HTI-1 transparency requirements met?",
+        "Are state-specific AI regulations applicable?"
+      ],
+      "assessment_methods": ["Regulatory mapping", "Gap analysis", "Compliance documentation review"],
+      "scoring_criteria": {
+        "1": "Full compliance with all applicable frameworks",
+        "2": "Substantially compliant, minor documentation gaps",
+        "3": "Partially compliant, remediation plan in place",
+        "4": "Significant compliance gaps, regulatory exposure identified",
+        "5": "Non-compliant, immediate regulatory risk"
+      }
+    }
+  },
+  "overall_risk_calculation": {
+    "method": "weighted_average",
+    "thresholds": {
+      "critical": "weighted_score >= 4.0 OR patient_safety_score == 5",
+      "high": "weighted_score >= 3.0",
+      "moderate": "weighted_score >= 2.0",
+      "low": "weighted_score < 2.0"
+    }
+  },
+  "governance_requirements_by_tier": {
+    "critical": {
+      "assessment_frequency": "Quarterly",
+      "approval_authority": "AI Governance Committee",
+      "monitoring": "Continuous real-time",
+      "incident_response": "Immediate auto-suspension capability",
+      "explainability": "Full model documentation and clinician training"
+    },
+    "high": {
+      "assessment_frequency": "Semi-annually",
+      "approval_authority": "AI Review Board",
+      "monitoring": "Weekly automated reports",
+      "incident_response": "24-hour investigation SLA",
+      "explainability": "Structured documentation and clinician briefing"
+    },
+    "moderate": {
+      "assessment_frequency": "Annually",
+      "approval_authority": "Governance Lead",
+      "monitoring": "Monthly automated reports",
+      "incident_response": "Standard incident management",
+      "explainability": "Standard documentation"
+    },
+    "low": {
+      "assessment_frequency": "Annually",
+      "approval_authority": "System Owner",
+      "monitoring": "Quarterly review",
+      "incident_response": "Standard incident management",
+      "explainability": "Basic documentation"
+    }
+  }
+}
