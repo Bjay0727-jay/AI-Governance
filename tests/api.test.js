@@ -1416,3 +1416,193 @@ describe('API Documentation', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// ==================== NOTIFICATIONS ====================
+
+describe('Notifications', () => {
+  test('GET /api/v1/notifications returns empty list initially', async () => {
+    const res = await request(app)
+      .get('/api/v1/notifications')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toBeInstanceOf(Array);
+    expect(res.body.unread_count).toBeDefined();
+  });
+
+  test('POST /api/v1/notifications/read-all works with no notifications', async () => {
+    const res = await request(app)
+      .post('/api/v1/notifications/read-all')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+  });
+
+  test('Notifications require authentication', async () => {
+    const res = await request(app).get('/api/v1/notifications');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ==================== TRAINING ====================
+
+describe('Training', () => {
+  test('GET /api/v1/training/modules returns seeded modules', async () => {
+    const res = await request(app)
+      .get('/api/v1/training/modules')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0].title).toBeTruthy();
+    expect(res.body.data[0].content).toBeTruthy();
+    expect(res.body.data[0].target_roles).toBeInstanceOf(Array);
+  });
+
+  test('GET /api/v1/training/modules/:id returns module detail', async () => {
+    const res = await request(app)
+      .get('/api/v1/training/modules/tm-platform-basics')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.title).toMatch(/Platform Basics/);
+    expect(res.body.data.completed).toBe(false);
+  });
+
+  test('GET /api/v1/training/modules/:id returns 404 for unknown', async () => {
+    const res = await request(app)
+      .get('/api/v1/training/modules/nonexistent')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  test('POST /api/v1/training/modules/:id/complete marks module completed', async () => {
+    const res = await request(app)
+      .post('/api/v1/training/modules/tm-platform-basics/complete')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ score: 95 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.score).toBe(95);
+    expect(res.body.data.module_id).toBe('tm-platform-basics');
+  });
+
+  test('POST /api/v1/training/modules/:id/complete is idempotent', async () => {
+    const res = await request(app)
+      .post('/api/v1/training/modules/tm-platform-basics/complete')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/already/i);
+  });
+
+  test('GET /api/v1/training/progress returns completion stats', async () => {
+    const res = await request(app)
+      .get('/api/v1/training/progress')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.total_modules).toBeGreaterThan(0);
+    expect(res.body.data.completed_modules).toBe(1);
+    expect(res.body.data.completion_percentage).toBeGreaterThan(0);
+    expect(res.body.data.average_score).toBe(95);
+    expect(res.body.data.completions).toBeInstanceOf(Array);
+    expect(res.body.data.completions[0].title).toBeTruthy();
+  });
+
+  test('Module shows as completed after completion', async () => {
+    const res = await request(app)
+      .get('/api/v1/training/modules/tm-platform-basics')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.completed).toBe(true);
+    expect(res.body.data.completion_data).toBeTruthy();
+  });
+
+  test('Training requires authentication', async () => {
+    const res = await request(app).get('/api/v1/training/modules');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ==================== OPERATIONS DASHBOARD ====================
+
+describe('Operations Dashboard', () => {
+  test('GET /api/v1/ops/metrics returns platform metrics', async () => {
+    const res = await request(app)
+      .get('/api/v1/ops/metrics')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.totals).toBeDefined();
+    expect(res.body.data.totals.users).toBeGreaterThan(0);
+    expect(res.body.data.totals.assets).toBeGreaterThan(0);
+    expect(res.body.data.users_by_role).toBeInstanceOf(Array);
+    expect(res.body.data.assets_by_risk).toBeInstanceOf(Array);
+    expect(res.body.data.activity_7d).toBeInstanceOf(Array);
+  });
+
+  test('GET /api/v1/ops/metrics blocked for non-admins', async () => {
+    const res = await request(app)
+      .get('/api/v1/ops/metrics')
+      .set('Authorization', `Bearer ${viewerToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  test('GET /api/v1/ops/tenant-health returns health score and coverage', async () => {
+    const res = await request(app)
+      .get('/api/v1/ops/tenant-health')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.health_score).toBeGreaterThan(0);
+    expect(res.body.data.health_grade).toBeTruthy();
+    expect(res.body.data.coverage).toBeDefined();
+    expect(res.body.data.coverage.assets).toBe(true);
+    expect(res.body.data.alerts).toBeInstanceOf(Array);
+  });
+
+  test('GET /api/v1/ops/tenant-health blocked for non-admins', async () => {
+    const res = await request(app)
+      .get('/api/v1/ops/tenant-health')
+      .set('Authorization', `Bearer ${viewerToken}`);
+    expect(res.status).toBe(403);
+  });
+});
+
+// ==================== AUDIT-READY REPORTS ====================
+
+describe('Audit-Ready Reports', () => {
+  test('GET /api/v1/reports/audit-pack returns HTML compliance report', async () => {
+    const res = await request(app)
+      .get('/api/v1/reports/audit-pack')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/html/);
+    expect(res.text).toContain('Compliance Audit Package');
+    expect(res.text).toContain('Control ID');
+    expect(res.text).toContain('ForgeAI Govern');
+  });
+
+  test('GET /api/v1/reports/audit-pack supports framework filter', async () => {
+    const res = await request(app)
+      .get('/api/v1/reports/audit-pack?framework=nist')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('NIST');
+  });
+
+  test('GET /api/v1/reports/asset-profile/:id returns HTML asset profile', async () => {
+    const res = await request(app)
+      .get(`/api/v1/reports/asset-profile/${assetId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/html/);
+    expect(res.text).toContain('AI Asset Profile');
+    expect(res.text).toContain('TestML Model');
+    expect(res.text).toContain('Risk Assessment History');
+  });
+
+  test('GET /api/v1/reports/asset-profile returns 404 for unknown', async () => {
+    const res = await request(app)
+      .get('/api/v1/reports/asset-profile/nonexistent')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  test('Audit reports require authentication', async () => {
+    const res = await request(app).get('/api/v1/reports/audit-pack');
+    expect(res.status).toBe(401);
+  });
+});

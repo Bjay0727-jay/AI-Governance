@@ -55,6 +55,22 @@ const App = {
     });
 
     this.navigate('dashboard');
+    this.pollNotifications();
+  },
+
+  async pollNotifications() {
+    try {
+      const data = await API.getNotifications({ unread_only: 'true', limit: '10' });
+      const badge = document.getElementById('notif-badge');
+      if (badge) {
+        if (data.unread_count > 0) {
+          badge.textContent = data.unread_count > 99 ? '99+' : data.unread_count;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+    } catch (e) { /* ignore */ }
   },
 
   // --- Authentication ---
@@ -132,6 +148,8 @@ const App = {
         case 'knowledge-base': content.innerHTML = await Pages.knowledgeBase(); break;
         case 'support': content.innerHTML = await Pages.support(); break;
         case 'feature-requests': content.innerHTML = await Pages.featureRequests(); break;
+        case 'training': content.innerHTML = await Pages.training(); break;
+        case 'ops-dashboard': content.innerHTML = await Pages.opsDashboard(); break;
         default: content.innerHTML = '<div class="empty-state"><p>Page not found</p></div>';
       }
       // Bind page-specific events after rendering

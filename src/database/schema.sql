@@ -454,3 +454,53 @@ CREATE TABLE IF NOT EXISTS feature_request_votes (
 
 CREATE INDEX idx_votes_request ON feature_request_votes(feature_request_id);
 CREATE INDEX idx_votes_user ON feature_request_votes(user_id);
+
+-- ============================================================================
+-- NOTIFICATIONS - In-app notification system
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    type TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_notif_user ON notifications(user_id, read);
+CREATE INDEX idx_notif_tenant ON notifications(tenant_id);
+
+-- ============================================================================
+-- TRAINING - Employee training modules and completion tracking
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS training_modules (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'general',
+    target_roles TEXT DEFAULT '[]',
+    content TEXT NOT NULL,
+    duration_minutes INTEGER NOT NULL DEFAULT 30,
+    passing_score INTEGER NOT NULL DEFAULT 80,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS training_completions (
+    id TEXT PRIMARY KEY,
+    module_id TEXT NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    score INTEGER,
+    status TEXT NOT NULL DEFAULT 'completed',
+    completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(module_id, user_id)
+);
+
+CREATE INDEX idx_training_completions_user ON training_completions(user_id);
+CREATE INDEX idx_training_completions_module ON training_completions(module_id);

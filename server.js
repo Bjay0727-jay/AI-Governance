@@ -147,6 +147,95 @@ try {
   console.log('Feature requests tables created.\n');
 }
 
+// Ensure notifications table exists (migration for existing databases)
+try {
+  db.prepare('SELECT 1 FROM notifications LIMIT 1').first();
+} catch {
+  const notifSQL = `
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      type TEXT NOT NULL DEFAULT 'info',
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      entity_type TEXT,
+      entity_id TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read);
+    CREATE INDEX IF NOT EXISTS idx_notif_tenant ON notifications(tenant_id);
+  `;
+  if (db.db && typeof db.db.exec === 'function') {
+    db.db.exec(notifSQL);
+  } else {
+    db.exec(notifSQL);
+  }
+  console.log('Notifications table created.\n');
+}
+
+// Ensure training tables exist (migration for existing databases)
+try {
+  db.prepare('SELECT 1 FROM training_modules LIMIT 1').first();
+} catch {
+  const trainingSQL = `
+    CREATE TABLE IF NOT EXISTS training_modules (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      target_roles TEXT DEFAULT '[]',
+      content TEXT NOT NULL,
+      duration_minutes INTEGER NOT NULL DEFAULT 30,
+      passing_score INTEGER NOT NULL DEFAULT 80,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS training_completions (
+      id TEXT PRIMARY KEY,
+      module_id TEXT NOT NULL REFERENCES training_modules(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      score INTEGER,
+      status TEXT NOT NULL DEFAULT 'completed',
+      completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(module_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_training_completions_user ON training_completions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_training_completions_module ON training_completions(module_id);
+  `;
+  if (db.db && typeof db.db.exec === 'function') {
+    db.db.exec(trainingSQL);
+  } else {
+    db.exec(trainingSQL);
+  }
+  console.log('Training tables created.\n');
+}
+
+// Seed training modules if empty
+const trainingCount = db.prepare('SELECT COUNT(*) as c FROM training_modules').first().c;
+if (trainingCount === 0) {
+  const modules = [
+    { id: 'tm-platform-basics', title: 'ForgeAI Govern Platform Basics', description: 'Introduction to the platform interface, navigation, and core concepts.', category: 'platform', target_roles: '["admin","governance_lead","reviewer","viewer"]', content: 'This module covers:\\n\\n1. **Platform Overview**: ForgeAI Govern is a healthcare AI governance platform aligned with NIST AI RMF, FDA SaMD, ONC HTI-1, and HIPAA.\\n\\n2. **Navigation**: The sidebar provides access to all modules: Dashboard, AI Assets, Risk Assessments, Impact Assessments, Compliance, Vendors, Monitoring, Maturity, Incidents, Reports, Knowledge Base, and Support.\\n\\n3. **Roles**: Admin (full access), Governance Lead (assessments + assets), Reviewer (review and approve), Viewer (read-only).\\n\\n4. **Key Workflows**: Register AI systems > Assess risks > Map compliance controls > Monitor performance > Report to stakeholders.', duration_minutes: 15, sort_order: 1 },
+    { id: 'tm-risk-assessment', title: 'Conducting AI Risk Assessments', description: 'Learn the 6-dimension weighted risk scoring methodology for healthcare AI systems.', category: 'governance', target_roles: '["admin","governance_lead","reviewer"]', content: 'This module covers the ForgeAI 6-dimension risk model:\\n\\n1. **Patient Safety (25%)**: Rate 1-5 based on potential for direct patient harm.\\n2. **Bias & Fairness (20%)**: Disparate impact risk across demographic groups.\\n3. **Data Privacy (15%)**: PHI exposure and de-identification effectiveness.\\n4. **Clinical Validity (15%)**: Scientific evidence supporting AI claims.\\n5. **Cybersecurity (15%)**: Attack surface and adversarial robustness.\\n6. **Regulatory (10%)**: Compliance gaps with FDA, HIPAA, state laws.\\n\\nOverall risk: Critical (>=4.0 or safety=5), High (>=3.0), Moderate (>=2.0), Low (<2.0).', duration_minutes: 30, sort_order: 2 },
+    { id: 'tm-compliance-mapping', title: 'Compliance Control Mapping', description: 'Map and implement controls across NIST AI RMF, FDA SaMD, ONC HTI-1, and HIPAA.', category: 'compliance', target_roles: '["admin","governance_lead","reviewer"]', content: 'This module covers compliance mapping:\\n\\n1. **NIST AI RMF**: 4 families (Govern, Map, Measure, Manage) with 39 controls mapped in ForgeAI.\\n2. **FDA SaMD**: Pre-market pathways (510(k), De Novo, PMA) and Predetermined Change Control Plans.\\n3. **ONC HTI-1**: Transparency requirements for Predictive Decision Support Interventions.\\n4. **HIPAA**: Privacy Rule, Security Rule, Breach Notification for AI systems processing PHI.\\n\\nFor each control: document implementation status, assign responsible party, link evidence, schedule reviews.', duration_minutes: 45, sort_order: 3 },
+    { id: 'tm-vendor-diligence', title: 'AI Vendor Due Diligence', description: 'Evaluate third-party AI vendors using the 5-dimension scoring framework.', category: 'governance', target_roles: '["admin","governance_lead"]', content: 'Vendor assessment dimensions:\\n\\n1. **Transparency (15%)**: Model architecture disclosure, training data documentation.\\n2. **Bias Testing (25%)**: Demographic testing methodology and results disaggregation.\\n3. **Security (25%)**: SOC 2 compliance, encryption, penetration testing.\\n4. **Data Practices (20%)**: PHI protections, data retention, sub-processor agreements.\\n5. **Contractual (15%)**: Audit rights, SLAs, performance guarantees, exit clauses.\\n\\nScoring: 0-100 scale. Below 40 = Rejected, 40-60 = Conditional, Above 60 = Approved.', duration_minutes: 30, sort_order: 4 },
+    { id: 'tm-incident-response', title: 'AI Incident Response', description: 'Procedures for reporting, investigating, and resolving AI-related incidents.', category: 'governance', target_roles: '["admin","governance_lead","reviewer"]', content: 'Incident response procedure:\\n\\n1. **Report**: Document incident type, severity, affected system, patient impact.\\n2. **Auto-Suspension**: Critical patient safety incidents auto-suspend the AI system.\\n3. **Investigate**: Assign team, document root cause analysis.\\n4. **Remediate**: Implement corrective actions with evidence.\\n5. **Resolve**: Close with full audit trail and lessons learned.\\n6. **Update**: Revise risk assessment based on incident findings.\\n\\nSeverity Levels: Critical (life safety), High (24hr response), Moderate (72hr review), Low (tracked).', duration_minutes: 20, sort_order: 5 },
+    { id: 'tm-hipaa-ai', title: 'HIPAA Compliance for AI Systems', description: 'Essential HIPAA requirements when AI systems access Protected Health Information.', category: 'regulatory', target_roles: '["admin","governance_lead","reviewer","viewer"]', content: 'HIPAA requirements for AI:\\n\\n1. **Privacy Rule**: Minimum necessary standard for PHI use. De-identify training data via Safe Harbor or Expert Determination.\\n2. **Security Rule**: Administrative, physical, technical safeguards. AI systems need access controls, audit logging, encryption.\\n3. **Breach Notification**: AI data breaches affecting PHI must be reported within 60 days.\\n4. **BAAs**: Required with AI vendors processing PHI.\\n5. **Risk Analysis**: Annual security risk analysis must include AI systems.\\n\\nForgeAI tracks PHI access per AI system and maps HIPAA controls.', duration_minutes: 25, sort_order: 6 },
+  ];
+  for (const m of modules) {
+    try {
+      db.prepare(
+        `INSERT INTO training_modules (id, title, description, category, target_roles, content, duration_minutes, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(m.id, m.title, m.description, m.category, m.target_roles, m.content, m.duration_minutes, m.sort_order).run();
+    } catch (e) { /* skip if already seeded */ }
+  }
+  console.log('Training modules seeded.\n');
+}
+
 // --- Build Environment Object (mimics Cloudflare env) ---
 const env = {
   DB: db,
@@ -1509,9 +1598,454 @@ app.get('/api/v1/docs', (req, res) => {
       { method: 'PUT', path: '/users/:id', auth: true, description: 'Update user', roles: 'admin' },
       { method: 'GET', path: '/audit-log', auth: true, description: 'View audit log', roles: 'admin' },
       { method: 'GET', path: '/docs', auth: false, description: 'This API documentation' },
+      { method: 'GET', path: '/notifications', auth: true, description: 'List notifications for current user' },
+      { method: 'PUT', path: '/notifications/:id/read', auth: true, description: 'Mark notification as read' },
+      { method: 'POST', path: '/notifications/read-all', auth: true, description: 'Mark all notifications as read' },
+      { method: 'GET', path: '/training/modules', auth: true, description: 'List training modules' },
+      { method: 'GET', path: '/training/modules/:id', auth: true, description: 'Get training module detail' },
+      { method: 'POST', path: '/training/modules/:id/complete', auth: true, description: 'Mark training module as completed' },
+      { method: 'GET', path: '/training/progress', auth: true, description: 'Get training progress for current user' },
+      { method: 'GET', path: '/ops/metrics', auth: true, description: 'Get operations metrics', roles: 'admin' },
+      { method: 'GET', path: '/ops/tenant-health', auth: true, description: 'Get tenant health scores', roles: 'admin' },
+      { method: 'GET', path: '/reports/audit-pack', auth: true, description: 'Generate audit-ready compliance package (HTML)' },
+      { method: 'GET', path: '/reports/asset-profile/:id', auth: true, description: 'Generate asset profile report (HTML)' },
     ],
   };
   res.json(docs);
+});
+
+// ==================== NOTIFICATIONS ====================
+
+function createNotification(tenantId, userId, type, title, message, entityType, entityId) {
+  try {
+    db.prepare(
+      `INSERT INTO notifications (id, tenant_id, user_id, type, title, message, entity_type, entity_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(crypto.randomUUID(), tenantId, userId, type, title, message, entityType || null, entityId || null).run();
+  } catch (e) { /* ignore notification failures */ }
+}
+
+function notifyTenantAdmins(tenantId, type, title, message, entityType, entityId) {
+  try {
+    const admins = db.prepare("SELECT id FROM users WHERE tenant_id = ? AND role = 'admin' AND status = 'active'").bind(tenantId).all();
+    for (const admin of admins.results) {
+      createNotification(tenantId, admin.id, type, title, message, entityType, entityId);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+app.get('/api/v1/notifications', requireAuth, (req, res) => {
+  const { unread_only, limit: lim } = req.query;
+  let where = 'WHERE n.user_id = ? AND n.tenant_id = ?';
+  const params = [req.user.user_id, req.user.tenant_id];
+  if (unread_only === 'true') { where += ' AND n.read = 0'; }
+  const limitVal = Math.min(parseInt(lim) || 50, 100);
+  const results = db.prepare(
+    `SELECT n.* FROM notifications n ${where} ORDER BY n.created_at DESC LIMIT ?`
+  ).bind(...params, limitVal).all();
+  const unreadCount = db.prepare(
+    'SELECT COUNT(*) as c FROM notifications WHERE user_id = ? AND tenant_id = ? AND read = 0'
+  ).bind(req.user.user_id, req.user.tenant_id).first().c;
+  res.json({ data: results.results, unread_count: unreadCount });
+});
+
+app.put('/api/v1/notifications/:id/read', requireAuth, (req, res) => {
+  const notif = db.prepare('SELECT * FROM notifications WHERE id = ? AND user_id = ?')
+    .bind(req.params.id, req.user.user_id).first();
+  if (!notif) return res.status(404).json({ error: 'Notification not found' });
+  db.prepare('UPDATE notifications SET read = 1 WHERE id = ?').bind(req.params.id).run();
+  res.json({ message: 'Notification marked as read' });
+});
+
+app.post('/api/v1/notifications/read-all', requireAuth, (req, res) => {
+  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND tenant_id = ? AND read = 0')
+    .bind(req.user.user_id, req.user.tenant_id).run();
+  res.json({ message: 'All notifications marked as read' });
+});
+
+// ==================== TRAINING ====================
+
+app.get('/api/v1/training/modules', requireAuth, (req, res) => {
+  const { category } = req.query;
+  let where = "WHERE status = 'active'";
+  const params = [];
+  if (category) { where += ' AND category = ?'; params.push(category); }
+  const modules = db.prepare(
+    `SELECT * FROM training_modules ${where} ORDER BY sort_order ASC`
+  ).bind(...params).all();
+
+  // Get completions for current user
+  const completions = db.prepare(
+    'SELECT module_id, score, completed_at FROM training_completions WHERE user_id = ?'
+  ).bind(req.user.user_id).all();
+  const completionMap = {};
+  for (const c of completions.results) { completionMap[c.module_id] = c; }
+
+  const data = modules.results.map(m => ({
+    ...m,
+    target_roles: JSON.parse(m.target_roles || '[]'),
+    completed: !!completionMap[m.id],
+    completion_data: completionMap[m.id] || null,
+  }));
+
+  res.json({ data });
+});
+
+app.get('/api/v1/training/modules/:id', requireAuth, (req, res) => {
+  const mod = db.prepare("SELECT * FROM training_modules WHERE id = ? AND status = 'active'").bind(req.params.id).first();
+  if (!mod) return res.status(404).json({ error: 'Training module not found' });
+  const completion = db.prepare(
+    'SELECT * FROM training_completions WHERE module_id = ? AND user_id = ?'
+  ).bind(req.params.id, req.user.user_id).first();
+  mod.target_roles = JSON.parse(mod.target_roles || '[]');
+  mod.completed = !!completion;
+  mod.completion_data = completion || null;
+  res.json({ data: mod });
+});
+
+app.post('/api/v1/training/modules/:id/complete', requireAuth, (req, res) => {
+  const mod = db.prepare("SELECT * FROM training_modules WHERE id = ? AND status = 'active'").bind(req.params.id).first();
+  if (!mod) return res.status(404).json({ error: 'Training module not found' });
+
+  const existing = db.prepare(
+    'SELECT id FROM training_completions WHERE module_id = ? AND user_id = ?'
+  ).bind(req.params.id, req.user.user_id).first();
+  if (existing) return res.json({ message: 'Already completed', data: existing });
+
+  const score = req.body.score || 100;
+  const id = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO training_completions (id, module_id, user_id, tenant_id, score)
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(id, req.params.id, req.user.user_id, req.user.tenant_id, score).run();
+
+  createNotification(req.user.tenant_id, req.user.user_id, 'success',
+    'Training Completed', `You completed "${mod.title}"`, 'training_module', req.params.id);
+
+  const completion = db.prepare('SELECT * FROM training_completions WHERE id = ?').bind(id).first();
+  res.status(201).json({ data: completion });
+});
+
+app.get('/api/v1/training/progress', requireAuth, (req, res) => {
+  const totalModules = db.prepare("SELECT COUNT(*) as c FROM training_modules WHERE status = 'active'").first().c;
+  const completedModules = db.prepare(
+    'SELECT COUNT(*) as c FROM training_completions WHERE user_id = ?'
+  ).bind(req.user.user_id).first().c;
+  const completions = db.prepare(
+    `SELECT tc.*, tm.title, tm.category FROM training_completions tc
+     JOIN training_modules tm ON tc.module_id = tm.id
+     WHERE tc.user_id = ? ORDER BY tc.completed_at DESC`
+  ).bind(req.user.user_id).all();
+  const avgScore = db.prepare(
+    'SELECT AVG(score) as avg FROM training_completions WHERE user_id = ?'
+  ).bind(req.user.user_id).first().avg || 0;
+
+  res.json({
+    data: {
+      total_modules: totalModules,
+      completed_modules: completedModules,
+      completion_percentage: totalModules > 0 ? Math.round((completedModules / totalModules) * 100) : 0,
+      average_score: Math.round(avgScore),
+      completions: completions.results,
+    },
+  });
+});
+
+// ==================== OPERATIONS DASHBOARD ====================
+
+app.get('/api/v1/ops/metrics', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+
+  const tid = req.user.tenant_id;
+  const totalUsers = db.prepare("SELECT COUNT(*) as c FROM users WHERE tenant_id = ? AND status = 'active'").bind(tid).first().c;
+  const totalAssets = db.prepare('SELECT COUNT(*) as c FROM ai_assets WHERE tenant_id = ?').bind(tid).first().c;
+  const totalRiskAssessments = db.prepare('SELECT COUNT(*) as c FROM risk_assessments WHERE tenant_id = ?').bind(tid).first().c;
+  const totalImpactAssessments = db.prepare('SELECT COUNT(*) as c FROM impact_assessments WHERE tenant_id = ?').bind(tid).first().c;
+  const totalIncidents = db.prepare('SELECT COUNT(*) as c FROM incidents WHERE tenant_id = ?').bind(tid).first().c;
+  const openIncidents = db.prepare("SELECT COUNT(*) as c FROM incidents WHERE tenant_id = ? AND status NOT IN ('resolved', 'closed')").bind(tid).first().c;
+  const totalEvidence = db.prepare('SELECT COUNT(*) as c FROM evidence WHERE tenant_id = ?').bind(tid).first().c;
+  const totalVendors = db.prepare('SELECT COUNT(*) as c FROM vendor_assessments WHERE tenant_id = ?').bind(tid).first().c;
+  const totalTickets = db.prepare('SELECT COUNT(*) as c FROM support_tickets WHERE tenant_id = ?').bind(tid).first().c;
+  const openTickets = db.prepare("SELECT COUNT(*) as c FROM support_tickets WHERE tenant_id = ? AND status NOT IN ('resolved', 'closed')").bind(tid).first().c;
+  const auditEntries = db.prepare('SELECT COUNT(*) as c FROM audit_log WHERE tenant_id = ?').bind(tid).first().c;
+
+  // Activity over last 7 days
+  const recentAudit = db.prepare(
+    "SELECT DATE(created_at) as day, COUNT(*) as count FROM audit_log WHERE tenant_id = ? AND created_at >= datetime('now', '-7 days') GROUP BY DATE(created_at) ORDER BY day"
+  ).bind(tid).all();
+
+  // Users by role
+  const usersByRole = db.prepare(
+    "SELECT role, COUNT(*) as count FROM users WHERE tenant_id = ? AND status = 'active' GROUP BY role"
+  ).bind(tid).all();
+
+  // Assets by risk tier
+  const assetsByRisk = db.prepare(
+    'SELECT risk_tier, COUNT(*) as count FROM ai_assets WHERE tenant_id = ? GROUP BY risk_tier'
+  ).bind(tid).all();
+
+  // Recent logins (last 30 days)
+  const recentLogins = db.prepare(
+    "SELECT COUNT(DISTINCT user_id) as c FROM audit_log WHERE tenant_id = ? AND action = 'login' AND created_at >= datetime('now', '-30 days')"
+  ).bind(tid).first().c;
+
+  res.json({
+    data: {
+      totals: { users: totalUsers, assets: totalAssets, risk_assessments: totalRiskAssessments,
+        impact_assessments: totalImpactAssessments, incidents: totalIncidents, open_incidents: openIncidents,
+        evidence: totalEvidence, vendors: totalVendors, tickets: totalTickets, open_tickets: openTickets,
+        audit_entries: auditEntries },
+      activity_7d: recentAudit.results,
+      users_by_role: usersByRole.results,
+      assets_by_risk: assetsByRisk.results,
+      active_users_30d: recentLogins,
+    },
+  });
+});
+
+app.get('/api/v1/ops/tenant-health', requireAuth, (req, res) => {
+  if (!authorize(req.user, ['admin'])) return res.status(403).json({ error: 'Admin access required' });
+
+  const tid = req.user.tenant_id;
+
+  // Calculate health score (0-100) based on governance completeness
+  const hasAssets = db.prepare('SELECT COUNT(*) as c FROM ai_assets WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasRiskAssessments = db.prepare('SELECT COUNT(*) as c FROM risk_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasImpactAssessments = db.prepare('SELECT COUNT(*) as c FROM impact_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasCompliance = db.prepare('SELECT COUNT(*) as c FROM control_implementations WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasVendors = db.prepare('SELECT COUNT(*) as c FROM vendor_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasMonitoring = db.prepare('SELECT COUNT(*) as c FROM monitoring_metrics WHERE tenant_id = ?').bind(tid).first().c > 0;
+  const hasMaturity = db.prepare('SELECT COUNT(*) as c FROM maturity_assessments WHERE tenant_id = ?').bind(tid).first().c > 0;
+
+  // Check for stale data (no activity in 30 days)
+  const recentActivity = db.prepare(
+    "SELECT COUNT(*) as c FROM audit_log WHERE tenant_id = ? AND created_at >= datetime('now', '-30 days')"
+  ).bind(tid).first().c;
+
+  // Check for overdue reviews
+  const overdueAssessments = db.prepare(
+    "SELECT COUNT(*) as c FROM risk_assessments WHERE tenant_id = ? AND next_review_date < datetime('now') AND status != 'rejected'"
+  ).bind(tid).first().c;
+
+  // Check for unresolved critical incidents
+  const criticalIncidents = db.prepare(
+    "SELECT COUNT(*) as c FROM incidents WHERE tenant_id = ? AND severity = 'critical' AND status NOT IN ('resolved', 'closed')"
+  ).bind(tid).first().c;
+
+  let healthScore = 0;
+  if (hasAssets) healthScore += 15;
+  if (hasRiskAssessments) healthScore += 15;
+  if (hasImpactAssessments) healthScore += 10;
+  if (hasCompliance) healthScore += 20;
+  if (hasVendors) healthScore += 10;
+  if (hasMonitoring) healthScore += 10;
+  if (hasMaturity) healthScore += 10;
+  if (recentActivity > 0) healthScore += 10;
+  if (overdueAssessments > 0) healthScore -= 10;
+  if (criticalIncidents > 0) healthScore -= 15;
+  healthScore = Math.max(0, Math.min(100, healthScore));
+
+  const alerts = [];
+  if (!hasAssets) alerts.push({ type: 'warning', message: 'No AI assets registered. Register your first AI system to begin governance.' });
+  if (!hasRiskAssessments) alerts.push({ type: 'warning', message: 'No risk assessments completed. Assess risk for your AI systems.' });
+  if (!hasCompliance) alerts.push({ type: 'warning', message: 'No compliance controls mapped. Begin control implementation.' });
+  if (overdueAssessments > 0) alerts.push({ type: 'danger', message: `${overdueAssessments} risk assessment(s) overdue for review.` });
+  if (criticalIncidents > 0) alerts.push({ type: 'danger', message: `${criticalIncidents} unresolved critical incident(s).` });
+  if (recentActivity === 0) alerts.push({ type: 'info', message: 'No platform activity in the last 30 days.' });
+
+  res.json({
+    data: {
+      health_score: healthScore,
+      health_grade: healthScore >= 80 ? 'A' : healthScore >= 60 ? 'B' : healthScore >= 40 ? 'C' : healthScore >= 20 ? 'D' : 'F',
+      coverage: { assets: hasAssets, risk_assessments: hasRiskAssessments, impact_assessments: hasImpactAssessments,
+        compliance: hasCompliance, vendors: hasVendors, monitoring: hasMonitoring, maturity: hasMaturity },
+      alerts,
+      overdue_assessments: overdueAssessments,
+      critical_incidents: criticalIncidents,
+      recent_activity_count: recentActivity,
+    },
+  });
+});
+
+// ==================== AUDIT-READY REPORTS ====================
+
+app.get('/api/v1/reports/audit-pack', requireAuth, (req, res) => {
+  const tid = req.user.tenant_id;
+  const { framework } = req.query;
+
+  // Gather all compliance data
+  let controlWhere = '';
+  const controlParams = [];
+  if (framework) {
+    const frameworkMap = { 'nist': 'nist_ai_rmf_ref', 'fda': 'fda_samd_ref', 'hipaa': 'hipaa_ref', 'onc': 'onc_hti1_ref' };
+    const col = frameworkMap[framework.toLowerCase()];
+    if (col) { controlWhere = ` AND c.${col} IS NOT NULL AND c.${col} != ''`; }
+  }
+
+  const controls = db.prepare(
+    `SELECT c.control_id, c.family, c.title, c.description, c.nist_ai_rmf_ref, c.fda_samd_ref, c.hipaa_ref, c.onc_hti1_ref,
+      ci.implementation_status, ci.implementation_details, ci.last_reviewed,
+      u.first_name || ' ' || u.last_name as responsible_party_name
+     FROM compliance_controls c
+     LEFT JOIN control_implementations ci ON c.id = ci.control_id AND ci.tenant_id = ?
+     LEFT JOIN users u ON ci.responsible_party = u.id
+     WHERE 1=1 ${controlWhere}
+     ORDER BY c.family, c.control_id`
+  ).bind(tid, ...controlParams).all();
+
+  const tenant = db.prepare('SELECT * FROM tenants WHERE id = ?').bind(tid).first();
+  const assetCount = db.prepare('SELECT COUNT(*) as c FROM ai_assets WHERE tenant_id = ?').bind(tid).first().c;
+  const implemented = controls.results.filter(c => c.implementation_status === 'implemented').length;
+  const partial = controls.results.filter(c => c.implementation_status === 'partially_implemented').length;
+  const total = controls.results.length;
+  const compliancePct = total > 0 ? Math.round(((implemented + partial * 0.5) / total) * 100) : 0;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Compliance Audit Package - ${tenant?.name || 'Organization'}</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a2e; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #2563eb; padding-bottom: 12px; }
+  h2 { color: #2563eb; margin-top: 30px; }
+  .meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 20px 0; }
+  .meta-item { padding: 12px; background: #f8fafc; border-radius: 6px; }
+  .meta-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; }
+  .meta-value { font-size: 18px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  th { background: #1a1a2e; color: white; padding: 10px 12px; text-align: left; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) { background: #f8fafc; }
+  .status-implemented { color: #16a34a; font-weight: 600; }
+  .status-partially_implemented { color: #d97706; font-weight: 600; }
+  .status-planned { color: #2563eb; font-weight: 600; }
+  .status-gap { color: #dc2626; font-weight: 600; }
+  .summary { background: #eff6ff; padding: 20px; border-radius: 8px; margin: 20px 0; }
+  .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b; }
+  @media print { body { margin: 20px; } }
+</style></head><body>
+<h1>Compliance Audit Package</h1>
+<p><strong>${tenant?.name || 'Organization'}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
+<div class="meta">
+  <div class="meta-item"><div class="meta-label">Overall Compliance</div><div class="meta-value">${compliancePct}%</div></div>
+  <div class="meta-item"><div class="meta-label">Controls Assessed</div><div class="meta-value">${total}</div></div>
+  <div class="meta-item"><div class="meta-label">AI Assets Governed</div><div class="meta-value">${assetCount}</div></div>
+  <div class="meta-item"><div class="meta-label">Framework</div><div class="meta-value">${framework ? framework.toUpperCase() : 'All Frameworks'}</div></div>
+</div>
+<div class="summary">
+  <strong>Summary:</strong> ${implemented} controls implemented, ${partial} partially implemented, ${total - implemented - partial} gaps identified out of ${total} total controls.
+</div>
+<h2>Control Implementation Status</h2>
+<table><thead><tr><th>Control ID</th><th>Family</th><th>Title</th><th>Status</th><th>Responsible Party</th><th>Last Reviewed</th><th>NIST Ref</th><th>FDA Ref</th></tr></thead><tbody>
+${controls.results.map(c => `<tr>
+  <td><strong>${c.control_id}</strong></td><td>${c.family}</td><td>${c.title}</td>
+  <td class="status-${c.implementation_status || 'gap'}">${(c.implementation_status || 'NOT IMPLEMENTED').replace(/_/g, ' ').toUpperCase()}</td>
+  <td>${c.responsible_party_name || '—'}</td><td>${c.last_reviewed ? new Date(c.last_reviewed).toLocaleDateString() : '—'}</td>
+  <td>${c.nist_ai_rmf_ref || '—'}</td><td>${c.fda_samd_ref || '—'}</td>
+</tr>`).join('')}
+</tbody></table>
+<div class="footer">
+  <p>This report was generated by ForgeAI Govern&trade; Healthcare AI Governance Platform. It represents the compliance status as of the generation date and should be reviewed by authorized personnel before submission to auditors or regulatory bodies.</p>
+  <p>Frameworks covered: NIST AI RMF 1.0, FDA SaMD, ONC HTI-1, HIPAA, State AI Laws</p>
+</div>
+</body></html>`;
+
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
+});
+
+app.get('/api/v1/reports/asset-profile/:id', requireAuth, (req, res) => {
+  const tid = req.user.tenant_id;
+  const asset = db.prepare(
+    `SELECT a.*, u.first_name || ' ' || u.last_name as owner_name
+     FROM ai_assets a LEFT JOIN users u ON a.owner_user_id = u.id
+     WHERE a.id = ? AND a.tenant_id = ?`
+  ).bind(req.params.id, tid).first();
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+
+  const risks = db.prepare(
+    `SELECT r.*, u.first_name || ' ' || u.last_name as assessor_name
+     FROM risk_assessments r JOIN users u ON r.assessor_id = u.id
+     WHERE r.ai_asset_id = ? AND r.tenant_id = ? ORDER BY r.created_at DESC`
+  ).bind(req.params.id, tid).all();
+
+  const impacts = db.prepare(
+    'SELECT * FROM impact_assessments WHERE ai_asset_id = ? AND tenant_id = ? ORDER BY created_at DESC'
+  ).bind(req.params.id, tid).all();
+
+  const incidents = db.prepare(
+    'SELECT * FROM incidents WHERE ai_asset_id = ? AND tenant_id = ? ORDER BY created_at DESC'
+  ).bind(req.params.id, tid).all();
+
+  const evidence = db.prepare(
+    "SELECT * FROM evidence WHERE entity_type = 'ai_asset' AND entity_id = ? AND tenant_id = ? ORDER BY created_at DESC"
+  ).bind(req.params.id, tid).all();
+
+  const tenant = db.prepare('SELECT name FROM tenants WHERE id = ?').bind(tid).first();
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AI Asset Profile - ${asset.name}</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a2e; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #2563eb; padding-bottom: 12px; }
+  h2 { color: #2563eb; margin-top: 30px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+  .field { padding: 10px; background: #f8fafc; border-radius: 6px; }
+  .field-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; }
+  .field-value { font-size: 14px; font-weight: 500; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  th { background: #1a1a2e; color: white; padding: 8px 10px; text-align: left; }
+  td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .badge-critical { background: #fef2f2; color: #dc2626; }
+  .badge-high { background: #fff7ed; color: #ea580c; }
+  .badge-moderate { background: #fefce8; color: #ca8a04; }
+  .badge-low { background: #f0fdf4; color: #16a34a; }
+  .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b; }
+  @media print { body { margin: 20px; } }
+</style></head><body>
+<h1>AI Asset Profile: ${asset.name}</h1>
+<p><strong>${tenant?.name || 'Organization'}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
+<div class="grid">
+  <div class="field"><div class="field-label">Vendor</div><div class="field-value">${asset.vendor || 'Internal'}</div></div>
+  <div class="field"><div class="field-label">Version</div><div class="field-value">${asset.version || 'N/A'}</div></div>
+  <div class="field"><div class="field-label">Category</div><div class="field-value">${(asset.category || '').replace(/_/g, ' ')}</div></div>
+  <div class="field"><div class="field-label">Risk Tier</div><div class="field-value"><span class="badge badge-${asset.risk_tier}">${asset.risk_tier?.toUpperCase()}</span></div></div>
+  <div class="field"><div class="field-label">Deployment Status</div><div class="field-value">${(asset.deployment_status || '').replace(/_/g, ' ')}</div></div>
+  <div class="field"><div class="field-label">PHI Access</div><div class="field-value">${asset.phi_access ? 'Yes' : 'No'}</div></div>
+  <div class="field"><div class="field-label">Owner</div><div class="field-value">${asset.owner_name || 'Unassigned'}</div></div>
+  <div class="field"><div class="field-label">Department</div><div class="field-value">${asset.department || 'N/A'}</div></div>
+  <div class="field"><div class="field-label">FDA Classification</div><div class="field-value">${asset.fda_classification || 'None'}</div></div>
+</div>
+${asset.description ? `<p><strong>Description:</strong> ${asset.description}</p>` : ''}
+${asset.intended_use ? `<p><strong>Intended Use:</strong> ${asset.intended_use}</p>` : ''}
+${asset.known_limitations ? `<p><strong>Known Limitations:</strong> ${asset.known_limitations}</p>` : ''}
+<h2>Risk Assessment History (${risks.results.length})</h2>
+${risks.results.length > 0 ? `<table><thead><tr><th>Date</th><th>Type</th><th>Assessor</th><th>Overall Risk</th><th>Patient Safety</th><th>Bias</th><th>Privacy</th><th>Clinical</th><th>Cyber</th><th>Regulatory</th><th>Status</th></tr></thead><tbody>
+${risks.results.map(r => `<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${r.assessment_type}</td><td>${r.assessor_name}</td>
+<td><span class="badge badge-${r.overall_risk_level}">${r.overall_risk_level?.toUpperCase()}</span></td>
+<td>${r.patient_safety_score || '—'}</td><td>${r.bias_fairness_score || '—'}</td><td>${r.data_privacy_score || '—'}</td>
+<td>${r.clinical_validity_score || '—'}</td><td>${r.cybersecurity_score || '—'}</td><td>${r.regulatory_score || '—'}</td>
+<td>${r.status}</td></tr>`).join('')}
+</tbody></table>` : '<p>No risk assessments recorded.</p>'}
+<h2>Impact Assessments (${impacts.results.length})</h2>
+${impacts.results.length > 0 ? `<table><thead><tr><th>Period</th><th>Drift Detected</th><th>Remediation</th><th>Status</th><th>Date</th></tr></thead><tbody>
+${impacts.results.map(ia => `<tr><td>${ia.assessment_period || 'N/A'}</td><td>${ia.drift_detected ? 'Yes' : 'No'}</td>
+<td>${ia.remediation_status || 'N/A'}</td><td>${ia.status}</td><td>${new Date(ia.created_at).toLocaleDateString()}</td></tr>`).join('')}
+</tbody></table>` : '<p>No impact assessments recorded.</p>'}
+<h2>Incident History (${incidents.results.length})</h2>
+${incidents.results.length > 0 ? `<table><thead><tr><th>Title</th><th>Type</th><th>Severity</th><th>Status</th><th>Patient Impact</th><th>Date</th></tr></thead><tbody>
+${incidents.results.map(i => `<tr><td>${i.title}</td><td>${i.incident_type.replace(/_/g, ' ')}</td>
+<td><span class="badge badge-${i.severity}">${i.severity.toUpperCase()}</span></td><td>${i.status}</td>
+<td>${i.patient_impact ? 'Yes' : 'No'}</td><td>${new Date(i.created_at).toLocaleDateString()}</td></tr>`).join('')}
+</tbody></table>` : '<p>No incidents recorded.</p>'}
+<h2>Evidence (${evidence.results.length})</h2>
+${evidence.results.length > 0 ? `<table><thead><tr><th>Title</th><th>Type</th><th>Description</th><th>Date</th></tr></thead><tbody>
+${evidence.results.map(e => `<tr><td>${e.title}</td><td>${e.evidence_type}</td><td>${e.description || '—'}</td><td>${new Date(e.created_at).toLocaleDateString()}</td></tr>`).join('')}
+</tbody></table>` : '<p>No evidence linked to this asset.</p>'}
+<div class="footer">
+  <p>Generated by ForgeAI Govern&trade; Healthcare AI Governance Platform. This profile is suitable for FDA submissions, Joint Commission reviews, and internal governance audits.</p>
+</div>
+</body></html>`;
+
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
 });
 
 // ==================== EXPORT ====================
