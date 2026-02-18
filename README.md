@@ -1,5 +1,7 @@
 # ForgeAI Govern™ - Healthcare AI Governance Platform
 
+[![View Portal](https://img.shields.io/badge/View%20Portal-ForgeAI%20Govern-blue)](https://github.com/Bjay0727-jay/AI-Governance)
+
 A cloud-native, multi-tenant SaaS platform for managing AI governance across healthcare organizations. Built on Cloudflare's edge computing infrastructure, aligned with NIST AI RMF, FDA SaMD, ONC HTI-1, HIPAA, and state AI legislation.
 
 ## Platform Overview
