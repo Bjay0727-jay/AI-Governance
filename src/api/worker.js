@@ -7,9 +7,12 @@
  */
 
 import { getAssetFromKV } from '@cloudflare/kv-asset-handler';
+import manifestJSON from '__STATIC_CONTENT_MANIFEST';
 import { Router } from './router.js';
 import { AuthService } from './auth.js';
 import { corsHeaders, jsonResponse, errorResponse } from './utils.js';
+
+const assetManifest = JSON.parse(manifestJSON);
 
 export default {
   async fetch(request, env, ctx) {
@@ -30,7 +33,7 @@ export default {
       try {
         return await getAssetFromKV(
           { request, waitUntil: ctx.waitUntil.bind(ctx) },
-          { ASSET_NAMESPACE: env.__STATIC_CONTENT, ASSET_MANIFEST: env.__STATIC_CONTENT_MANIFEST }
+          { ASSET_NAMESPACE: env.__STATIC_CONTENT, ASSET_MANIFEST: assetManifest }
         );
       } catch (e) {
         // If asset not found, serve index.html for SPA routing
@@ -38,7 +41,7 @@ export default {
           const indexRequest = new Request(new URL('/', request.url).toString(), request);
           return await getAssetFromKV(
             { request: indexRequest, waitUntil: ctx.waitUntil.bind(ctx) },
-            { ASSET_NAMESPACE: env.__STATIC_CONTENT, ASSET_MANIFEST: env.__STATIC_CONTENT_MANIFEST }
+            { ASSET_NAMESPACE: env.__STATIC_CONTENT, ASSET_MANIFEST: assetManifest }
           );
         } catch (e2) {
           return jsonResponse({ message: 'ForgeAI Govern™ API v1.0' });
