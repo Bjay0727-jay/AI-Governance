@@ -21,7 +21,7 @@ bucket_name = "forgeai-evidence"
 
 [[kv_namespaces]]
 binding = "SESSION_CACHE"
-id = "placeholder-replace-with-actual-id"
+id = "72057762e6e7432baf6af57956f78b65"
 
 [site]
 bucket = "./src/frontend"
