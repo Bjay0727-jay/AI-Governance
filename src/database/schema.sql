@@ -4,9 +4,8 @@
 -- Aligned with: NIST AI RMF, FDA SaMD, ONC HTI-1, HIPAA, State AI Laws
 -- ============================================================================
 
--- Enable WAL mode for better concurrent read performance
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+-- Note: PRAGMA statements removed for Cloudflare D1 compatibility
+-- D1 manages journal mode and foreign keys internally
 
 -- ============================================================================
 -- TENANTS - Healthcare organizations using the platform
