@@ -48,3 +48,28 @@ export function paginate(query, page = 1, limit = 25) {
   const offset = (Math.max(1, page) - 1) * Math.min(100, Math.max(1, limit));
   return { offset, limit: Math.min(100, Math.max(1, limit)) };
 }
+
+export function csvResponse(rows, columns, filename) {
+  const header = columns.map(c => `"${c.label}"`).join(',');
+  const lines = rows.map(r =>
+    columns.map(c => `"${String(r[c.key] ?? '').replace(/"/g, '""')}"`).join(',')
+  );
+  return new Response([header, ...lines].join('\n'), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      ...corsHeaders(),
+    },
+  });
+}
+
+export function htmlResponse(html) {
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      ...corsHeaders(),
+    },
+  });
+}
