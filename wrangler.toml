@@ -13,7 +13,7 @@ PBKDF2_ITERATIONS = "100000"
 [[d1_databases]]
 binding = "DB"
 database_name = "forgeai-govern-db"
-database_id = "placeholder-replace-with-actual-id"
+database_id = "c20c9759-46e2-4b9d-9744-7c72759b640d"
 
 [[r2_buckets]]
 binding = "EVIDENCE_STORE"
