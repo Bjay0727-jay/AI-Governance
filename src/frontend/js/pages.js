@@ -81,7 +81,7 @@ const Pages = {
             <div class="compliance-gauge">
               <svg width="120" height="120" viewBox="0 0 120 120">
                 <circle cx="60" cy="60" r="50" fill="none" stroke="#e2e8f0" stroke-width="10"/>
-                <circle cx="60" cy="60" r="50" fill="none" stroke="#2563eb" stroke-width="10"
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#14b8a6" stroke-width="10"
                   stroke-dasharray="${(comp.compliance_percentage||0)*3.14} 314" stroke-linecap="round"/>
               </svg>
               <div class="gauge-text">${comp.compliance_percentage||0}%</div>

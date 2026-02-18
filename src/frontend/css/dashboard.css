@@ -312,7 +312,7 @@
     user-select: none;
 }
 .vote-box:hover { border-color: var(--accent); background: var(--bg); }
-.vote-box.voted { border-color: var(--accent); background: rgba(37, 99, 235, 0.08); }
+.vote-box.voted { border-color: var(--accent); background: rgba(20, 184, 166, 0.08); }
 .vote-arrow { font-size: 14px; color: var(--text-muted); line-height: 1; }
 .vote-box.voted .vote-arrow { color: var(--accent); }
 .vote-count { font-size: 16px; font-weight: 700; }
@@ -359,10 +359,10 @@
     font-size: 18px;
     cursor: pointer;
     padding: 4px 8px;
-    color: var(--text-secondary);
+    color: rgba(255,255,255,0.7);
     transition: color 0.2s;
 }
-.notif-bell:hover { color: var(--text); }
+.notif-bell:hover { color: #ffffff; }
 .notif-badge {
     position: absolute;
     top: 0;
@@ -391,7 +391,7 @@
     border-radius: 4px;
 }
 .notif-item:hover { background: var(--bg); }
-.notif-item.unread { background: rgba(37, 99, 235, 0.04); }
+.notif-item.unread { background: rgba(20, 184, 166, 0.04); }
 .notif-item.unread strong { color: var(--text); }
 .notif-icon {
     width: 28px;
@@ -403,7 +403,7 @@
     font-size: 14px;
     flex-shrink: 0;
 }
-.notif-info { background: #eff6ff; color: var(--accent); }
+.notif-info { background: #f0fdfa; color: var(--accent); }
 .notif-success { background: #f0fdf4; color: var(--success); }
 .notif-warning { background: #fefce8; color: var(--warning); }
 .notif-danger { background: #fef2f2; color: var(--danger); }
