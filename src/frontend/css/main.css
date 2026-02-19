@@ -161,7 +161,7 @@ body {
 .nav-menu { list-style: none; padding: 12px 0; flex: 1; }
 .nav-item {
     padding: 10px 20px; cursor: pointer; display: flex; align-items: center; gap: 10px;
-    color: rgba(148, 163, 184, 0.85); font-size: 13px; font-weight: 500; transition: all 0.2s;
+    color: #ffffff; font-size: 13px; font-weight: 500; transition: all 0.2s;
 }
 .nav-item:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
 .nav-item.active { background: rgba(20, 184, 166, 0.1); color: #14b8a6; border-right: 3px solid #14b8a6; }
