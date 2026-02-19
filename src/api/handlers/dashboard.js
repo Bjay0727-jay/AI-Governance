@@ -169,6 +169,36 @@ export class DashboardHandlers {
     });
   }
 
+  async getOnboardingProgress(ctx) {
+    const tid = ctx.user.tenant_id;
+
+    const [hasAssets, hasRisk, hasImpact, hasCompliance, hasVendors, hasMaturity, userCount] = await Promise.all([
+      this.db.prepare('SELECT COUNT(*) as c FROM ai_assets WHERE tenant_id = ?').bind(tid).first(),
+      this.db.prepare('SELECT COUNT(*) as c FROM risk_assessments WHERE tenant_id = ?').bind(tid).first(),
+      this.db.prepare('SELECT COUNT(*) as c FROM impact_assessments WHERE tenant_id = ?').bind(tid).first(),
+      this.db.prepare('SELECT COUNT(*) as c FROM control_implementations WHERE tenant_id = ?').bind(tid).first(),
+      this.db.prepare('SELECT COUNT(*) as c FROM vendor_assessments WHERE tenant_id = ?').bind(tid).first(),
+      this.db.prepare('SELECT COUNT(*) as c FROM maturity_assessments WHERE tenant_id = ?').bind(tid).first(),
+      this.db.prepare("SELECT COUNT(*) as c FROM users WHERE tenant_id = ? AND status = 'active'").bind(tid).first(),
+    ]);
+
+    const steps = [
+      { key: 'register', label: 'Create your organization', completed: true, description: 'Set up your ForgeAI Govern account' },
+      { key: 'add_asset', label: 'Register an AI system', completed: hasAssets.c > 0, description: 'Add your first AI/ML system to the governance registry' },
+      { key: 'risk_assessment', label: 'Complete a risk assessment', completed: hasRisk.c > 0, description: 'Evaluate risk across 6 dimensions for an AI system' },
+      { key: 'impact_assessment', label: 'Run an impact assessment', completed: hasImpact.c > 0, description: 'Assess algorithmic bias and fairness' },
+      { key: 'compliance', label: 'Map compliance controls', completed: hasCompliance.c > 0, description: 'Implement controls from NIST AI RMF, FDA SaMD, HIPAA' },
+      { key: 'vendor_assessment', label: 'Assess a vendor', completed: hasVendors.c > 0, description: 'Evaluate a third-party AI vendor' },
+      { key: 'maturity', label: 'Assess governance maturity', completed: hasMaturity.c > 0, description: 'Score your org across 7 governance domains' },
+      { key: 'invite_team', label: 'Invite team members', completed: userCount.c > 1, description: 'Add colleagues with appropriate roles' },
+    ];
+
+    const completedCount = steps.filter(s => s.completed).length;
+    const percentage = Math.round((completedCount / steps.length) * 100);
+
+    return jsonResponse({ data: { steps, completed: completedCount, total: steps.length, percentage } });
+  }
+
   async getStatsData(tenantId) {
     const assets = await this.db.prepare(
       `SELECT COUNT(*) as total,
