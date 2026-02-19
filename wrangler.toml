@@ -13,6 +13,8 @@ compatibility_flags = ["nodejs_compat"]
 # Static frontend assets served automatically
 [assets]
 directory = "./src/frontend"
+html_handling = "auto-trailing-slash"
+not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "production"
@@ -33,8 +35,3 @@ bucket_name = "forgeai-evidence"
 [[kv_namespaces]]
 binding = "SESSION_CACHE"
 id = "72057762e6e7432baf6af57956f78b65"
-
-[assets]
-directory = "./src/frontend"
-html_handling = "auto-trailing-slash"
-not_found_handling = "single-page-application"
