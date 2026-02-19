@@ -59,6 +59,10 @@ body {
     backdrop-filter: blur(12px);
 }
 .login-header { text-align: center; margin-bottom: 32px; }
+.logo-full { margin-bottom: 16px; }
+.logo-full-img { max-width: 260px; height: auto; }
+.login-title { font-size: 22px; color: #ffffff; font-weight: 700; margin: 0 0 4px 0; }
+.login-title sup { font-size: 10px; }
 .logo { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px; }
 .logo-img { width: 36px; height: 36px; }
 .logo-icon { font-size: 28px; color: #14b8a6; }
