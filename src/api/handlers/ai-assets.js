@@ -5,7 +5,7 @@
  * Supports: CRUD, risk tier classification, lifecycle status tracking.
  */
 
-import { jsonResponse, errorResponse, generateUUID, paginate } from '../utils.js';
+import { jsonResponse, errorResponse, generateUUID, paginate, validateRequestBody } from '../utils.js';
 
 export class AIAssetHandlers {
   constructor(env) {
@@ -108,6 +108,14 @@ export class AIAssetHandlers {
     if (!ctx.auth.authorize(ctx.user, ['admin', 'governance_lead', 'reviewer'])) {
       return errorResponse('Insufficient permissions', 403);
     }
+
+    // Reject system fields
+    const ALLOWED_UPDATE_FIELDS = ['name', 'vendor', 'version', 'category', 'risk_tier', 'fda_classification',
+      'fda_clearance_number', 'deployment_status', 'deployment_date', 'owner_user_id',
+      'clinical_champion_id', 'department', 'description', 'intended_use',
+      'known_limitations', 'training_data_description', 'data_sources', 'phi_access', 'phi_data_types'];
+    const validationErrors = validateRequestBody(body, ALLOWED_UPDATE_FIELDS);
+    if (validationErrors) return errorResponse(validationErrors.join('; '), 400);
 
     const existing = await this.db.prepare(
       'SELECT * FROM ai_assets WHERE id = ? AND tenant_id = ?'

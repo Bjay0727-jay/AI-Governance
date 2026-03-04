@@ -9,6 +9,7 @@ const API = {
   baseUrl: '/api/v1',
   accessToken: null,
   refreshToken: null,
+  csrfToken: null,
   user: null,
   tenant: null,
 
@@ -26,6 +27,7 @@ const API = {
     this.refreshToken = localStorage.getItem('forgeai_refresh_token');
     this.user = JSON.parse(localStorage.getItem('forgeai_user') || 'null');
     this.tenant = JSON.parse(localStorage.getItem('forgeai_tenant') || 'null');
+    if (this.accessToken) this.fetchCsrfToken();
     return !!this.accessToken;
   },
 
@@ -47,11 +49,25 @@ const API = {
     localStorage.removeItem('forgeai_tenant');
   },
 
+  async fetchCsrfToken() {
+    try {
+      const response = await fetch(`${this.baseUrl}/csrf-token`);
+      if (response.ok) {
+        const data = await response.json();
+        this.csrfToken = data.csrf_token;
+      }
+    } catch { /* CSRF token fetch failure is non-fatal */ }
+  },
+
   // --- HTTP Client ---
 
   async request(method, path, body = null, retry = true) {
     const headers = { 'Content-Type': 'application/json' };
     if (this.accessToken) headers['Authorization'] = `Bearer ${this.accessToken}`;
+    // Include CSRF token on state-changing requests
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && this.csrfToken) {
+      headers['X-CSRF-Token'] = this.csrfToken;
+    }
 
     const options = { method, headers };
     if (body && ['POST', 'PUT', 'PATCH'].includes(method)) {
@@ -96,6 +112,7 @@ const API = {
     const data = await this.request('POST', '/auth/login', { email, password });
     this.setTokens(data.access_token, data.refresh_token);
     this.setUser(data.user, data.tenant);
+    await this.fetchCsrfToken();
     return data;
   },
 
@@ -106,10 +123,20 @@ const API = {
     });
     this.setTokens(data.access_token, data.refresh_token);
     this.setUser(data.user, data.tenant);
+    await this.fetchCsrfToken();
     return data;
   },
 
-  logout() { this.clearAuth(); },
+  async logout() {
+    // Server-side token revocation
+    if (this.refreshToken) {
+      try {
+        await this.request('POST', '/auth/logout', { refresh_token: this.refreshToken });
+      } catch { /* Best-effort logout */ }
+    }
+    this.csrfToken = null;
+    this.clearAuth();
+  },
 
   // --- AI Assets ---
   getAssets(params = {}) {

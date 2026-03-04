@@ -18,7 +18,14 @@ const cookieParser = require('cookie-parser');
 const { createDatabase } = require('./src/local/db-adapter');
 
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'forgeai-local-dev-secret-' + crypto.randomBytes(8).toString('hex');
+const JWT_SECRET = (() => {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'test') return 'test-secret-' + crypto.randomBytes(16).toString('hex');
+  // Local development: generate a random secret per-run (not hardcoded, not committed to source)
+  const secret = crypto.randomBytes(32).toString('hex');
+  console.warn('WARNING: JWT_SECRET not set. Generated ephemeral secret for this session. Set JWT_SECRET env var for production.');
+  return secret;
+})();
 const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString('hex');
 
 // --- Initialize Database ---
@@ -250,7 +257,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:"],
     },
@@ -259,12 +266,22 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || true,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (same-origin, curl, etc.)
+    if (!origin) return callback(null, true);
+    const allowedOrigins = process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+      : ['http://localhost:3000'];
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, origin);
+    }
+    return callback(new Error('CORS: origin not allowed'));
+  },
   credentials: true,
 }));
 
 app.use(cookieParser());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '100kb' }));
 
 // Global rate limiter: 200 requests per minute per IP
 const globalLimiter = rateLimit({
@@ -287,6 +304,22 @@ const authLimiter = rateLimit({
 
 // Serve static frontend
 app.use(express.static(path.join(__dirname, 'src', 'frontend')));
+
+// --- HTML Escaping for report generation ---
+function escapeHtml(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[<>"'&]/g, (char) => {
+    const entities = { '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '&': '&amp;' };
+    return entities[char];
+  });
+}
+function esc(val, fallback = '') {
+  if (val === null || val === undefined || val === '') return fallback;
+  return escapeHtml(String(val));
+}
+
+// --- Token Revocation (in-memory for local dev) ---
+const revokedTokens = new Set();
 
 // --- Auth Service (inline for local mode) ---
 
@@ -379,15 +412,58 @@ function requireAuth(req, res, next) {
 
 // --- Health Check ---
 app.get('/api/v1/health', (req, res) => {
-  res.json({ status: 'healthy', version: '1.0.0', mode: 'local', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'healthy',
+    version: '1.0.0',
+    mode: 'local',
+    timestamp: new Date().toISOString(),
+    jwt_configured: !!process.env.JWT_SECRET,
+  });
 });
 
 // --- CSRF Token Endpoint ---
 app.get('/api/v1/csrf-token', (req, res) => {
-  const token = crypto.createHmac('sha256', CSRF_SECRET)
-    .update(crypto.randomBytes(16).toString('hex'))
-    .digest('hex');
-  res.json({ csrf_token: token });
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const sig = crypto.createHmac('sha256', CSRF_SECRET).update(nonce).digest('hex');
+  res.json({ csrf_token: `${nonce}.${sig}` });
+});
+
+// --- CSRF Validation Middleware (state-changing requests on authenticated routes) ---
+function validateCsrf(req, res, next) {
+  // Skip for auth endpoints (login/register/refresh are public)
+  if (req.path.startsWith('/api/v1/auth/')) return next();
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+
+  const token = req.headers['x-csrf-token'];
+  if (!token) return res.status(403).json({ error: 'Missing CSRF token' });
+
+  const parts = token.split('.');
+  if (parts.length !== 2) return res.status(403).json({ error: 'Invalid CSRF token format' });
+  const [nonce, sig] = parts;
+  const expected = crypto.createHmac('sha256', CSRF_SECRET).update(nonce).digest('hex');
+  if (sig !== expected) return res.status(403).json({ error: 'Invalid CSRF token' });
+
+  next();
+}
+app.use('/api/', validateCsrf);
+
+// --- Logout Endpoint ---
+app.post('/api/v1/auth/logout', (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) return res.status(400).json({ error: 'Refresh token required' });
+
+  const payload = verifyToken(refresh_token);
+  if (!payload || payload.type !== 'refresh') return res.status(401).json({ error: 'Invalid refresh token' });
+
+  // Revoke token (in-memory for local dev)
+  if (payload.jti) {
+    revokedTokens.add(payload.jti);
+    // Auto-cleanup after token would have expired
+    const ttl = Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
+    setTimeout(() => revokedTokens.delete(payload.jti), ttl * 1000);
+  }
+
+  res.json({ message: 'Logged out successfully' });
 });
 
 // ==================== AUTH ROUTES ====================
@@ -413,7 +489,7 @@ app.post('/api/v1/auth/register', authLimiter, async (req, res) => {
       .bind(userId, tenantId, sanitizeString(email, 254), passwordHash, sanitizeString(first_name, 100), sanitizeString(last_name, 100)).run();
 
     const accessToken = createToken({ user_id: userId, tenant_id: tenantId, role: 'admin' }, ACCESS_TOKEN_EXPIRY);
-    const refreshToken = createToken({ user_id: userId, tenant_id: tenantId, type: 'refresh' }, REFRESH_TOKEN_EXPIRY);
+    const refreshToken = createToken({ user_id: userId, tenant_id: tenantId, type: 'refresh', jti: crypto.randomUUID() }, REFRESH_TOKEN_EXPIRY);
     auditLog(tenantId, userId, 'register', 'tenant', tenantId, { organization: organization_name });
 
     res.status(201).json({
@@ -459,7 +535,7 @@ app.post('/api/v1/auth/login', authLimiter, async (req, res) => {
       .bind(user.id).run();
 
     const accessToken = createToken({ user_id: user.id, tenant_id: user.tenant_id, role: user.role }, ACCESS_TOKEN_EXPIRY);
-    const refreshToken = createToken({ user_id: user.id, tenant_id: user.tenant_id, type: 'refresh' }, REFRESH_TOKEN_EXPIRY);
+    const refreshToken = createToken({ user_id: user.id, tenant_id: user.tenant_id, type: 'refresh', jti: crypto.randomUUID() }, REFRESH_TOKEN_EXPIRY);
     auditLog(user.tenant_id, user.id, 'login', 'user', user.id, {});
 
     res.json({
@@ -479,11 +555,16 @@ app.post('/api/v1/auth/refresh', (req, res) => {
   const payload = verifyToken(refresh_token);
   if (!payload || payload.type !== 'refresh') return res.status(401).json({ error: 'Invalid refresh token' });
 
+  // Check if token has been revoked
+  if (payload.jti && revokedTokens.has(payload.jti)) {
+    return res.status(401).json({ error: 'Token has been revoked' });
+  }
+
   const user = db.prepare(`SELECT id, tenant_id, role FROM users WHERE id = ? AND status = 'active'`).bind(payload.user_id).first();
   if (!user) return res.status(401).json({ error: 'User not found' });
 
   const newAccess = createToken({ user_id: user.id, tenant_id: user.tenant_id, role: user.role }, ACCESS_TOKEN_EXPIRY);
-  const newRefresh = createToken({ user_id: user.id, tenant_id: user.tenant_id, type: 'refresh' }, REFRESH_TOKEN_EXPIRY);
+  const newRefresh = createToken({ user_id: user.id, tenant_id: user.tenant_id, type: 'refresh', jti: crypto.randomUUID() }, REFRESH_TOKEN_EXPIRY);
   res.json({ access_token: newAccess, refresh_token: newRefresh, token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
 });
 
@@ -1900,7 +1981,10 @@ app.get('/api/v1/reports/audit-pack', requireAuth, (req, res) => {
   const total = controls.results.length;
   const compliancePct = total > 0 ? Math.round(((implemented + partial * 0.5) / total) * 100) : 0;
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Compliance Audit Package - ${tenant?.name || 'Organization'}</title>
+  const tenantName = esc(tenant?.name, 'Organization');
+  const frameworkDisplay = framework ? esc(framework.toUpperCase()) : 'All Frameworks';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Compliance Audit Package - ${tenantName}</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a2e; line-height: 1.6; }
   h1 { color: #1a1a2e; border-bottom: 3px solid #2563eb; padding-bottom: 12px; }
@@ -1922,12 +2006,12 @@ app.get('/api/v1/reports/audit-pack', requireAuth, (req, res) => {
   @media print { body { margin: 20px; } }
 </style></head><body>
 <h1>Compliance Audit Package</h1>
-<p><strong>${tenant?.name || 'Organization'}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
+<p><strong>${tenantName}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
 <div class="meta">
   <div class="meta-item"><div class="meta-label">Overall Compliance</div><div class="meta-value">${compliancePct}%</div></div>
   <div class="meta-item"><div class="meta-label">Controls Assessed</div><div class="meta-value">${total}</div></div>
   <div class="meta-item"><div class="meta-label">AI Assets Governed</div><div class="meta-value">${assetCount}</div></div>
-  <div class="meta-item"><div class="meta-label">Framework</div><div class="meta-value">${framework ? framework.toUpperCase() : 'All Frameworks'}</div></div>
+  <div class="meta-item"><div class="meta-label">Framework</div><div class="meta-value">${frameworkDisplay}</div></div>
 </div>
 <div class="summary">
   <strong>Summary:</strong> ${implemented} controls implemented, ${partial} partially implemented, ${total - implemented - partial} gaps identified out of ${total} total controls.
@@ -1935,10 +2019,10 @@ app.get('/api/v1/reports/audit-pack', requireAuth, (req, res) => {
 <h2>Control Implementation Status</h2>
 <table><thead><tr><th>Control ID</th><th>Family</th><th>Title</th><th>Status</th><th>Responsible Party</th><th>Last Reviewed</th><th>NIST Ref</th><th>FDA Ref</th></tr></thead><tbody>
 ${controls.results.map(c => `<tr>
-  <td><strong>${c.control_id}</strong></td><td>${c.family}</td><td>${c.title}</td>
-  <td class="status-${c.implementation_status || 'gap'}">${(c.implementation_status || 'NOT IMPLEMENTED').replace(/_/g, ' ').toUpperCase()}</td>
-  <td>${c.responsible_party_name || '—'}</td><td>${c.last_reviewed ? new Date(c.last_reviewed).toLocaleDateString() : '—'}</td>
-  <td>${c.nist_ai_rmf_ref || '—'}</td><td>${c.fda_samd_ref || '—'}</td>
+  <td><strong>${esc(c.control_id)}</strong></td><td>${esc(c.family)}</td><td>${esc(c.title)}</td>
+  <td class="status-${esc(c.implementation_status, 'gap')}">${esc((c.implementation_status || 'NOT IMPLEMENTED').replace(/_/g, ' ').toUpperCase())}</td>
+  <td>${esc(c.responsible_party_name, '—')}</td><td>${c.last_reviewed ? new Date(c.last_reviewed).toLocaleDateString() : '—'}</td>
+  <td>${esc(c.nist_ai_rmf_ref, '—')}</td><td>${esc(c.fda_samd_ref, '—')}</td>
 </tr>`).join('')}
 </tbody></table>
 <div class="footer">
@@ -1948,6 +2032,7 @@ ${controls.results.map(c => `<tr>
 </body></html>`;
 
   res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
   res.send(html);
 });
 
@@ -1980,7 +2065,10 @@ app.get('/api/v1/reports/asset-profile/:id', requireAuth, (req, res) => {
 
   const tenant = db.prepare('SELECT name FROM tenants WHERE id = ?').bind(tid).first();
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AI Asset Profile - ${asset.name}</title>
+  const assetName = esc(asset.name);
+  const tenantName = esc(tenant?.name, 'Organization');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AI Asset Profile - ${assetName}</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a2e; line-height: 1.6; }
   h1 { color: #1a1a2e; border-bottom: 3px solid #2563eb; padding-bottom: 12px; }
@@ -2000,44 +2088,44 @@ app.get('/api/v1/reports/asset-profile/:id', requireAuth, (req, res) => {
   .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b; }
   @media print { body { margin: 20px; } }
 </style></head><body>
-<h1>AI Asset Profile: ${asset.name}</h1>
-<p><strong>${tenant?.name || 'Organization'}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
+<h1>AI Asset Profile: ${assetName}</h1>
+<p><strong>${tenantName}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
 <div class="grid">
-  <div class="field"><div class="field-label">Vendor</div><div class="field-value">${asset.vendor || 'Internal'}</div></div>
-  <div class="field"><div class="field-label">Version</div><div class="field-value">${asset.version || 'N/A'}</div></div>
-  <div class="field"><div class="field-label">Category</div><div class="field-value">${(asset.category || '').replace(/_/g, ' ')}</div></div>
-  <div class="field"><div class="field-label">Risk Tier</div><div class="field-value"><span class="badge badge-${asset.risk_tier}">${asset.risk_tier?.toUpperCase()}</span></div></div>
-  <div class="field"><div class="field-label">Deployment Status</div><div class="field-value">${(asset.deployment_status || '').replace(/_/g, ' ')}</div></div>
+  <div class="field"><div class="field-label">Vendor</div><div class="field-value">${esc(asset.vendor, 'Internal')}</div></div>
+  <div class="field"><div class="field-label">Version</div><div class="field-value">${esc(asset.version, 'N/A')}</div></div>
+  <div class="field"><div class="field-label">Category</div><div class="field-value">${esc((asset.category || '').replace(/_/g, ' '))}</div></div>
+  <div class="field"><div class="field-label">Risk Tier</div><div class="field-value"><span class="badge badge-${esc(asset.risk_tier)}">${esc(asset.risk_tier?.toUpperCase())}</span></div></div>
+  <div class="field"><div class="field-label">Deployment Status</div><div class="field-value">${esc((asset.deployment_status || '').replace(/_/g, ' '))}</div></div>
   <div class="field"><div class="field-label">PHI Access</div><div class="field-value">${asset.phi_access ? 'Yes' : 'No'}</div></div>
-  <div class="field"><div class="field-label">Owner</div><div class="field-value">${asset.owner_name || 'Unassigned'}</div></div>
-  <div class="field"><div class="field-label">Department</div><div class="field-value">${asset.department || 'N/A'}</div></div>
-  <div class="field"><div class="field-label">FDA Classification</div><div class="field-value">${asset.fda_classification || 'None'}</div></div>
+  <div class="field"><div class="field-label">Owner</div><div class="field-value">${esc(asset.owner_name, 'Unassigned')}</div></div>
+  <div class="field"><div class="field-label">Department</div><div class="field-value">${esc(asset.department, 'N/A')}</div></div>
+  <div class="field"><div class="field-label">FDA Classification</div><div class="field-value">${esc(asset.fda_classification, 'None')}</div></div>
 </div>
-${asset.description ? `<p><strong>Description:</strong> ${asset.description}</p>` : ''}
-${asset.intended_use ? `<p><strong>Intended Use:</strong> ${asset.intended_use}</p>` : ''}
-${asset.known_limitations ? `<p><strong>Known Limitations:</strong> ${asset.known_limitations}</p>` : ''}
+${asset.description ? `<p><strong>Description:</strong> ${esc(asset.description)}</p>` : ''}
+${asset.intended_use ? `<p><strong>Intended Use:</strong> ${esc(asset.intended_use)}</p>` : ''}
+${asset.known_limitations ? `<p><strong>Known Limitations:</strong> ${esc(asset.known_limitations)}</p>` : ''}
 <h2>Risk Assessment History (${risks.results.length})</h2>
 ${risks.results.length > 0 ? `<table><thead><tr><th>Date</th><th>Type</th><th>Assessor</th><th>Overall Risk</th><th>Patient Safety</th><th>Bias</th><th>Privacy</th><th>Clinical</th><th>Cyber</th><th>Regulatory</th><th>Status</th></tr></thead><tbody>
-${risks.results.map(r => `<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${r.assessment_type}</td><td>${r.assessor_name}</td>
-<td><span class="badge badge-${r.overall_risk_level}">${r.overall_risk_level?.toUpperCase()}</span></td>
+${risks.results.map(r => `<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${esc(r.assessment_type)}</td><td>${esc(r.assessor_name)}</td>
+<td><span class="badge badge-${esc(r.overall_risk_level)}">${esc(r.overall_risk_level?.toUpperCase())}</span></td>
 <td>${r.patient_safety_score || '—'}</td><td>${r.bias_fairness_score || '—'}</td><td>${r.data_privacy_score || '—'}</td>
 <td>${r.clinical_validity_score || '—'}</td><td>${r.cybersecurity_score || '—'}</td><td>${r.regulatory_score || '—'}</td>
-<td>${r.status}</td></tr>`).join('')}
+<td>${esc(r.status)}</td></tr>`).join('')}
 </tbody></table>` : '<p>No risk assessments recorded.</p>'}
 <h2>Impact Assessments (${impacts.results.length})</h2>
 ${impacts.results.length > 0 ? `<table><thead><tr><th>Period</th><th>Drift Detected</th><th>Remediation</th><th>Status</th><th>Date</th></tr></thead><tbody>
-${impacts.results.map(ia => `<tr><td>${ia.assessment_period || 'N/A'}</td><td>${ia.drift_detected ? 'Yes' : 'No'}</td>
-<td>${ia.remediation_status || 'N/A'}</td><td>${ia.status}</td><td>${new Date(ia.created_at).toLocaleDateString()}</td></tr>`).join('')}
+${impacts.results.map(ia => `<tr><td>${esc(ia.assessment_period, 'N/A')}</td><td>${ia.drift_detected ? 'Yes' : 'No'}</td>
+<td>${esc(ia.remediation_status, 'N/A')}</td><td>${esc(ia.status)}</td><td>${new Date(ia.created_at).toLocaleDateString()}</td></tr>`).join('')}
 </tbody></table>` : '<p>No impact assessments recorded.</p>'}
 <h2>Incident History (${incidents.results.length})</h2>
 ${incidents.results.length > 0 ? `<table><thead><tr><th>Title</th><th>Type</th><th>Severity</th><th>Status</th><th>Patient Impact</th><th>Date</th></tr></thead><tbody>
-${incidents.results.map(i => `<tr><td>${i.title}</td><td>${i.incident_type.replace(/_/g, ' ')}</td>
-<td><span class="badge badge-${i.severity}">${i.severity.toUpperCase()}</span></td><td>${i.status}</td>
+${incidents.results.map(i => `<tr><td>${esc(i.title)}</td><td>${esc(i.incident_type.replace(/_/g, ' '))}</td>
+<td><span class="badge badge-${esc(i.severity)}">${esc(i.severity.toUpperCase())}</span></td><td>${esc(i.status)}</td>
 <td>${i.patient_impact ? 'Yes' : 'No'}</td><td>${new Date(i.created_at).toLocaleDateString()}</td></tr>`).join('')}
 </tbody></table>` : '<p>No incidents recorded.</p>'}
 <h2>Evidence (${evidence.results.length})</h2>
 ${evidence.results.length > 0 ? `<table><thead><tr><th>Title</th><th>Type</th><th>Description</th><th>Date</th></tr></thead><tbody>
-${evidence.results.map(e => `<tr><td>${e.title}</td><td>${e.evidence_type}</td><td>${e.description || '—'}</td><td>${new Date(e.created_at).toLocaleDateString()}</td></tr>`).join('')}
+${evidence.results.map(e => `<tr><td>${esc(e.title)}</td><td>${esc(e.evidence_type)}</td><td>${esc(e.description, '—')}</td><td>${new Date(e.created_at).toLocaleDateString()}</td></tr>`).join('')}
 </tbody></table>` : '<p>No evidence linked to this asset.</p>'}
 <div class="footer">
   <p>Generated by ForgeAI Govern&trade; Healthcare AI Governance Platform. This profile is suitable for FDA submissions, Joint Commission reviews, and internal governance audits.</p>
@@ -2045,6 +2133,7 @@ ${evidence.results.map(e => `<tr><td>${e.title}</td><td>${e.evidence_type}</td><
 </body></html>`;
 
   res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
   res.send(html);
 });
 

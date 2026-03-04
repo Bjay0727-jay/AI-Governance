@@ -5,7 +5,7 @@
  * suitable for FDA submissions, HIPAA audits, and internal governance reviews.
  */
 
-import { errorResponse, htmlResponse } from '../utils.js';
+import { errorResponse, htmlResponse, esc } from '../utils.js';
 
 export class ReportHandlers {
   constructor(env) {
@@ -41,7 +41,10 @@ export class ReportHandlers {
     const total = controls.results.length;
     const compliancePct = total > 0 ? Math.round(((implemented + partial * 0.5) / total) * 100) : 0;
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Compliance Audit Package - ${tenant?.name || 'Organization'}</title>
+    const tenantName = esc(tenant?.name, 'Organization');
+    const frameworkDisplay = framework ? esc(framework.toUpperCase()) : 'All Frameworks';
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Compliance Audit Package - ${tenantName}</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a2e; line-height: 1.6; }
   h1 { color: #1a1a2e; border-bottom: 3px solid #0D9488; padding-bottom: 12px; }
@@ -63,12 +66,12 @@ export class ReportHandlers {
   @media print { body { margin: 20px; } }
 </style></head><body>
 <h1>Compliance Audit Package</h1>
-<p><strong>${tenant?.name || 'Organization'}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
+<p><strong>${tenantName}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
 <div class="meta">
   <div class="meta-item"><div class="meta-label">Overall Compliance</div><div class="meta-value">${compliancePct}%</div></div>
   <div class="meta-item"><div class="meta-label">Controls Assessed</div><div class="meta-value">${total}</div></div>
   <div class="meta-item"><div class="meta-label">AI Assets Governed</div><div class="meta-value">${assetCount.c}</div></div>
-  <div class="meta-item"><div class="meta-label">Framework</div><div class="meta-value">${framework ? framework.toUpperCase() : 'All Frameworks'}</div></div>
+  <div class="meta-item"><div class="meta-label">Framework</div><div class="meta-value">${frameworkDisplay}</div></div>
 </div>
 <div class="summary">
   <strong>Summary:</strong> ${implemented} controls implemented, ${partial} partially implemented, ${total - implemented - partial} gaps identified out of ${total} total controls.
@@ -76,10 +79,10 @@ export class ReportHandlers {
 <h2>Control Implementation Status</h2>
 <table><thead><tr><th>Control ID</th><th>Family</th><th>Title</th><th>Status</th><th>Responsible Party</th><th>Last Reviewed</th><th>NIST Ref</th><th>FDA Ref</th></tr></thead><tbody>
 ${controls.results.map(c => `<tr>
-  <td><strong>${c.control_id}</strong></td><td>${c.family}</td><td>${c.title}</td>
-  <td class="status-${c.implementation_status || 'gap'}">${(c.implementation_status || 'NOT IMPLEMENTED').replace(/_/g, ' ').toUpperCase()}</td>
-  <td>${c.responsible_party_name || '\u2014'}</td><td>${c.last_reviewed ? new Date(c.last_reviewed).toLocaleDateString() : '\u2014'}</td>
-  <td>${c.nist_ai_rmf_ref || '\u2014'}</td><td>${c.fda_samd_ref || '\u2014'}</td>
+  <td><strong>${esc(c.control_id)}</strong></td><td>${esc(c.family)}</td><td>${esc(c.title)}</td>
+  <td class="status-${esc(c.implementation_status, 'gap')}">${esc((c.implementation_status || 'NOT IMPLEMENTED').replace(/_/g, ' ').toUpperCase())}</td>
+  <td>${esc(c.responsible_party_name, '\u2014')}</td><td>${c.last_reviewed ? new Date(c.last_reviewed).toLocaleDateString() : '\u2014'}</td>
+  <td>${esc(c.nist_ai_rmf_ref, '\u2014')}</td><td>${esc(c.fda_samd_ref, '\u2014')}</td>
 </tr>`).join('')}
 </tbody></table>
 <div class="footer">
@@ -108,7 +111,10 @@ ${controls.results.map(c => `<tr>
       this.db.prepare('SELECT name FROM tenants WHERE id = ?').bind(tid).first(),
     ]);
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AI Asset Profile - ${asset.name}</title>
+    const assetName = esc(asset.name);
+    const tenantName = esc(tenant?.name, 'Organization');
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AI Asset Profile - ${assetName}</title>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a2e; line-height: 1.6; }
   h1 { color: #1a1a2e; border-bottom: 3px solid #0D9488; padding-bottom: 12px; }
@@ -128,43 +134,43 @@ ${controls.results.map(c => `<tr>
   .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b; }
   @media print { body { margin: 20px; } }
 </style></head><body>
-<h1>AI Asset Profile: ${asset.name}</h1>
-<p><strong>${tenant?.name || 'Organization'}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
+<h1>AI Asset Profile: ${assetName}</h1>
+<p><strong>${tenantName}</strong> | Generated: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} | ForgeAI Govern&trade;</p>
 <div class="grid">
-  <div class="field"><div class="field-label">Vendor</div><div class="field-value">${asset.vendor || 'Internal'}</div></div>
-  <div class="field"><div class="field-label">Version</div><div class="field-value">${asset.version || 'N/A'}</div></div>
-  <div class="field"><div class="field-label">Category</div><div class="field-value">${(asset.category || '').replace(/_/g, ' ')}</div></div>
-  <div class="field"><div class="field-label">Risk Tier</div><div class="field-value"><span class="badge badge-${asset.risk_tier}">${asset.risk_tier?.toUpperCase()}</span></div></div>
-  <div class="field"><div class="field-label">Deployment Status</div><div class="field-value">${(asset.deployment_status || '').replace(/_/g, ' ')}</div></div>
+  <div class="field"><div class="field-label">Vendor</div><div class="field-value">${esc(asset.vendor, 'Internal')}</div></div>
+  <div class="field"><div class="field-label">Version</div><div class="field-value">${esc(asset.version, 'N/A')}</div></div>
+  <div class="field"><div class="field-label">Category</div><div class="field-value">${esc((asset.category || '').replace(/_/g, ' '))}</div></div>
+  <div class="field"><div class="field-label">Risk Tier</div><div class="field-value"><span class="badge badge-${esc(asset.risk_tier)}">${esc(asset.risk_tier?.toUpperCase())}</span></div></div>
+  <div class="field"><div class="field-label">Deployment Status</div><div class="field-value">${esc((asset.deployment_status || '').replace(/_/g, ' '))}</div></div>
   <div class="field"><div class="field-label">PHI Access</div><div class="field-value">${asset.phi_access ? 'Yes' : 'No'}</div></div>
-  <div class="field"><div class="field-label">Owner</div><div class="field-value">${asset.owner_name || 'Unassigned'}</div></div>
-  <div class="field"><div class="field-label">Department</div><div class="field-value">${asset.department || 'N/A'}</div></div>
-  <div class="field"><div class="field-label">FDA Classification</div><div class="field-value">${asset.fda_classification || 'None'}</div></div>
+  <div class="field"><div class="field-label">Owner</div><div class="field-value">${esc(asset.owner_name, 'Unassigned')}</div></div>
+  <div class="field"><div class="field-label">Department</div><div class="field-value">${esc(asset.department, 'N/A')}</div></div>
+  <div class="field"><div class="field-label">FDA Classification</div><div class="field-value">${esc(asset.fda_classification, 'None')}</div></div>
 </div>
-${asset.description ? `<p><strong>Description:</strong> ${asset.description}</p>` : ''}
-${asset.intended_use ? `<p><strong>Intended Use:</strong> ${asset.intended_use}</p>` : ''}
+${asset.description ? `<p><strong>Description:</strong> ${esc(asset.description)}</p>` : ''}
+${asset.intended_use ? `<p><strong>Intended Use:</strong> ${esc(asset.intended_use)}</p>` : ''}
 <h2>Risk Assessment History (${risks.results.length})</h2>
 ${risks.results.length > 0 ? `<table><thead><tr><th>Date</th><th>Type</th><th>Assessor</th><th>Overall Risk</th><th>Patient Safety</th><th>Bias</th><th>Privacy</th><th>Clinical</th><th>Cyber</th><th>Regulatory</th><th>Status</th></tr></thead><tbody>
-${risks.results.map(r => `<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${r.assessment_type}</td><td>${r.assessor_name}</td>
-<td><span class="badge badge-${r.overall_risk_level}">${r.overall_risk_level?.toUpperCase()}</span></td>
+${risks.results.map(r => `<tr><td>${new Date(r.created_at).toLocaleDateString()}</td><td>${esc(r.assessment_type)}</td><td>${esc(r.assessor_name)}</td>
+<td><span class="badge badge-${esc(r.overall_risk_level)}">${esc(r.overall_risk_level?.toUpperCase())}</span></td>
 <td>${r.patient_safety_score || '\u2014'}</td><td>${r.bias_fairness_score || '\u2014'}</td><td>${r.data_privacy_score || '\u2014'}</td>
 <td>${r.clinical_validity_score || '\u2014'}</td><td>${r.cybersecurity_score || '\u2014'}</td><td>${r.regulatory_score || '\u2014'}</td>
-<td>${r.status}</td></tr>`).join('')}
+<td>${esc(r.status)}</td></tr>`).join('')}
 </tbody></table>` : '<p>No risk assessments recorded.</p>'}
 <h2>Impact Assessments (${impacts.results.length})</h2>
 ${impacts.results.length > 0 ? `<table><thead><tr><th>Period</th><th>Drift</th><th>Remediation</th><th>Status</th><th>Date</th></tr></thead><tbody>
-${impacts.results.map(ia => `<tr><td>${ia.assessment_period || 'N/A'}</td><td>${ia.drift_detected ? 'Yes' : 'No'}</td>
-<td>${ia.remediation_status || 'N/A'}</td><td>${ia.status}</td><td>${new Date(ia.created_at).toLocaleDateString()}</td></tr>`).join('')}
+${impacts.results.map(ia => `<tr><td>${esc(ia.assessment_period, 'N/A')}</td><td>${ia.drift_detected ? 'Yes' : 'No'}</td>
+<td>${esc(ia.remediation_status, 'N/A')}</td><td>${esc(ia.status)}</td><td>${new Date(ia.created_at).toLocaleDateString()}</td></tr>`).join('')}
 </tbody></table>` : '<p>No impact assessments recorded.</p>'}
 <h2>Incident History (${incidents.results.length})</h2>
 ${incidents.results.length > 0 ? `<table><thead><tr><th>Title</th><th>Type</th><th>Severity</th><th>Status</th><th>Patient Impact</th><th>Date</th></tr></thead><tbody>
-${incidents.results.map(i => `<tr><td>${i.title}</td><td>${i.incident_type.replace(/_/g, ' ')}</td>
-<td><span class="badge badge-${i.severity}">${i.severity.toUpperCase()}</span></td><td>${i.status}</td>
+${incidents.results.map(i => `<tr><td>${esc(i.title)}</td><td>${esc(i.incident_type.replace(/_/g, ' '))}</td>
+<td><span class="badge badge-${esc(i.severity)}">${esc(i.severity.toUpperCase())}</span></td><td>${esc(i.status)}</td>
 <td>${i.patient_impact ? 'Yes' : 'No'}</td><td>${new Date(i.created_at).toLocaleDateString()}</td></tr>`).join('')}
 </tbody></table>` : '<p>No incidents recorded.</p>'}
 <h2>Evidence (${evidence.results.length})</h2>
 ${evidence.results.length > 0 ? `<table><thead><tr><th>Title</th><th>Type</th><th>Description</th><th>Date</th></tr></thead><tbody>
-${evidence.results.map(e => `<tr><td>${e.title}</td><td>${e.evidence_type}</td><td>${e.description || '\u2014'}</td><td>${new Date(e.created_at).toLocaleDateString()}</td></tr>`).join('')}
+${evidence.results.map(e => `<tr><td>${esc(e.title)}</td><td>${esc(e.evidence_type)}</td><td>${esc(e.description, '\u2014')}</td><td>${new Date(e.created_at).toLocaleDateString()}</td></tr>`).join('')}
 </tbody></table>` : '<p>No evidence linked to this asset.</p>'}
 <div class="footer">
   <p>Generated by ForgeAI Govern&trade; Healthcare AI Governance Platform. This profile is suitable for FDA submissions, Joint Commission reviews, and internal governance audits.</p>
