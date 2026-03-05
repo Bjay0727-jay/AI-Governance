@@ -53,9 +53,6 @@ id = "72057762e6e7432baf6af57956f78b65"
 [env.staging]
 name = "forgeai-govern-staging"
 
-[env.staging.triggers]
-crons = ["0 2 * * *"]
-
 [env.staging.vars]
 ENVIRONMENT = "staging"
 ALLOWED_ORIGINS = "https://forgeai-govern-staging.stanley-riley.workers.dev"
@@ -85,9 +82,6 @@ id = "1fde6caf27e3498b8fe496fd3354d62a"
 
 [env.production]
 name = "forgeai-govern"
-
-[env.production.triggers]
-crons = ["0 2 * * *"]
 
 [env.production.vars]
 ENVIRONMENT = "production"
