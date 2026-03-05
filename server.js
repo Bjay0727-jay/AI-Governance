@@ -201,6 +201,34 @@ if (trainingCount === 0) {
   console.log('Training modules seeded.\n');
 }
 
+// --- Migration 0003: Evidence file storage, audit hash chaining, BAA tracking ---
+function runColumnMigration(table, column, ddl) {
+  try {
+    db.prepare(`SELECT ${column} FROM ${table} LIMIT 1`).first();
+  } catch {
+    const execFn = db.db && typeof db.db.exec === 'function' ? db.db : db;
+    execFn.exec(ddl);
+    console.log(`Migration: added ${column} to ${table}`);
+  }
+}
+
+// Evidence file storage columns
+runColumnMigration('evidence', 'file_key', 'ALTER TABLE evidence ADD COLUMN file_key TEXT;');
+runColumnMigration('evidence', 'file_name', 'ALTER TABLE evidence ADD COLUMN file_name TEXT;');
+runColumnMigration('evidence', 'file_size', 'ALTER TABLE evidence ADD COLUMN file_size INTEGER;');
+runColumnMigration('evidence', 'file_type', 'ALTER TABLE evidence ADD COLUMN file_type TEXT;');
+runColumnMigration('evidence', 'sha256_hash', 'ALTER TABLE evidence ADD COLUMN sha256_hash TEXT;');
+runColumnMigration('evidence', 'retention_expires_at', 'ALTER TABLE evidence ADD COLUMN retention_expires_at TEXT;');
+
+// Audit log hash chaining columns
+runColumnMigration('audit_log', 'previous_hash', 'ALTER TABLE audit_log ADD COLUMN previous_hash TEXT;');
+runColumnMigration('audit_log', 'entry_hash', 'ALTER TABLE audit_log ADD COLUMN entry_hash TEXT;');
+runColumnMigration('audit_log', 'data_classification', "ALTER TABLE audit_log ADD COLUMN data_classification TEXT DEFAULT 'standard';");
+
+// BAA tracking on tenants
+runColumnMigration('tenants', 'hipaa_baa_signed_at', 'ALTER TABLE tenants ADD COLUMN hipaa_baa_signed_at TEXT;');
+runColumnMigration('tenants', 'hipaa_baa_signed_by', 'ALTER TABLE tenants ADD COLUMN hipaa_baa_signed_by TEXT;');
+
 // --- Build Environment Object (mimics Cloudflare env) ---
 const env = {
   DB: db,

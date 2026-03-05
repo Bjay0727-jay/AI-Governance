@@ -54,6 +54,10 @@ beforeAll(async () => {
   adminUserId = res.body.user.id;
   tenantId = res.body.tenant.id;
 
+  // Acknowledge HIPAA BAA for test tenant so PHI-accessing assets can be created
+  db.prepare("UPDATE tenants SET hipaa_baa_signed = 1, hipaa_baa_signed_at = datetime('now'), hipaa_baa_signed_by = ? WHERE id = ?")
+    .bind(res.body.user.id, tenantId).run();
+
   // Create viewer user
   const viewerRes = await request(app)
     .post('/api/v1/users')

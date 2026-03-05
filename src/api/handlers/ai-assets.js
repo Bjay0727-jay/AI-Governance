@@ -82,6 +82,15 @@ export class AIAssetHandlers {
       'nlp_extraction', 'operational', 'administrative', 'revenue_cycle', 'other'];
     if (!validCategories.includes(category)) return errorResponse(`Invalid category. Must be one of: ${validCategories.join(', ')}`, 400);
 
+    // HIPAA BAA enforcement: block PHI operations if BAA not signed
+    if (body.phi_access) {
+      const tenant = await this.db.prepare('SELECT hipaa_baa_signed FROM tenants WHERE id = ?')
+        .bind(ctx.user.tenant_id).first();
+      if (!tenant || !tenant.hipaa_baa_signed) {
+        return errorResponse('Cannot enable PHI access: HIPAA Business Associate Agreement has not been signed. Complete BAA acknowledgment in organization settings first.', 403);
+      }
+    }
+
     const id = generateUUID();
     await this.db.prepare(
       `INSERT INTO ai_assets (id, tenant_id, name, vendor, version, category, risk_tier, fda_classification,
@@ -127,6 +136,15 @@ export class AIAssetHandlers {
       'clinical_champion_id', 'department', 'description', 'intended_use',
       'known_limitations', 'training_data_description'];
 
+    // HIPAA BAA enforcement: block PHI operations if BAA not signed
+    if (body.phi_access && !existing.phi_access) {
+      const tenant = await this.db.prepare('SELECT hipaa_baa_signed FROM tenants WHERE id = ?')
+        .bind(ctx.user.tenant_id).first();
+      if (!tenant || !tenant.hipaa_baa_signed) {
+        return errorResponse('Cannot enable PHI access: HIPAA Business Associate Agreement has not been signed. Complete BAA acknowledgment in organization settings first.', 403);
+      }
+    }
+
     const updates = [];
     const values = [];
     for (const field of fields) {
@@ -147,7 +165,18 @@ export class AIAssetHandlers {
       `UPDATE ai_assets SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`
     ).bind(...values, id, ctx.user.tenant_id).run();
 
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'ai_asset', id, { updated_fields: Object.keys(body) });
+    // Build before/after diff for audit trail
+    const changedFields = Object.keys(body);
+    const before = {};
+    const after = {};
+    for (const field of changedFields) {
+      before[field] = existing[field];
+      after[field] = body[field];
+    }
+    const phiRelated = changedFields.includes('phi_access') || changedFields.includes('phi_data_types');
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'ai_asset', id,
+      { updated_fields: changedFields, before, after },
+      { dataClassification: phiRelated ? 'phi' : 'standard' });
 
     const updated = await this.db.prepare('SELECT * FROM ai_assets WHERE id = ?').bind(id).first();
     return jsonResponse({ data: updated });

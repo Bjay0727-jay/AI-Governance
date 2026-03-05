@@ -2,6 +2,7 @@
  * ForgeAI Govern™ - CSV Export Handlers
  *
  * Data export endpoints for assets, assessments, compliance, vendors, incidents, and evidence.
+ * All exports are audit-logged for compliance traceability.
  */
 
 import { csvResponse } from '../utils.js';
@@ -18,6 +19,10 @@ export class ExportHandlers {
        WHERE a.tenant_id = ? ORDER BY a.name`
     ).bind(ctx.user.tenant_id).all();
 
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'export', 'ai_asset', null,
+      { export_type: 'csv', record_count: results.results.length },
+      { dataClassification: 'sensitive' });
+
     return csvResponse(results.results, [
       { key: 'name', label: 'Name' }, { key: 'vendor', label: 'Vendor' }, { key: 'version', label: 'Version' },
       { key: 'category', label: 'Category' }, { key: 'risk_tier', label: 'Risk Tier' },
@@ -33,6 +38,10 @@ export class ExportHandlers {
        FROM risk_assessments r JOIN ai_assets a ON r.ai_asset_id = a.id JOIN users u ON r.assessor_id = u.id
        WHERE r.tenant_id = ? ORDER BY r.created_at DESC`
     ).bind(ctx.user.tenant_id).all();
+
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'export', 'risk_assessment', null,
+      { export_type: 'csv', record_count: results.results.length },
+      { dataClassification: 'sensitive' });
 
     return csvResponse(results.results, [
       { key: 'asset_name', label: 'AI System' }, { key: 'assessment_type', label: 'Type' },
@@ -53,6 +62,10 @@ export class ExportHandlers {
        ORDER BY cc.family, cc.control_id`
     ).bind(ctx.user.tenant_id).all();
 
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'export', 'compliance', null,
+      { export_type: 'csv', record_count: results.results.length },
+      { dataClassification: 'sensitive' });
+
     return csvResponse(results.results, [
       { key: 'control_id', label: 'Control ID' }, { key: 'family', label: 'Family' }, { key: 'title', label: 'Title' },
       { key: 'implementation_status', label: 'Status' }, { key: 'nist_ai_rmf_ref', label: 'NIST AI RMF' },
@@ -65,6 +78,10 @@ export class ExportHandlers {
       `SELECT va.*, u.first_name || ' ' || u.last_name as assessor_name FROM vendor_assessments va
        LEFT JOIN users u ON va.assessed_by = u.id WHERE va.tenant_id = ? ORDER BY va.created_at DESC`
     ).bind(ctx.user.tenant_id).all();
+
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'export', 'vendor_assessment', null,
+      { export_type: 'csv', record_count: results.results.length },
+      { dataClassification: 'sensitive' });
 
     return csvResponse(results.results, [
       { key: 'vendor_name', label: 'Vendor' }, { key: 'product_name', label: 'Product' },
@@ -83,6 +100,10 @@ export class ExportHandlers {
        WHERE i.tenant_id = ? ORDER BY i.created_at DESC`
     ).bind(ctx.user.tenant_id).all();
 
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'export', 'incident', null,
+      { export_type: 'csv', record_count: results.results.length },
+      { dataClassification: 'sensitive' });
+
     return csvResponse(results.results, [
       { key: 'title', label: 'Title' }, { key: 'asset_name', label: 'AI System' },
       { key: 'incident_type', label: 'Type' }, { key: 'severity', label: 'Severity' },
@@ -99,6 +120,10 @@ export class ExportHandlers {
        FROM evidence e LEFT JOIN users u ON e.uploaded_by = u.id
        WHERE e.tenant_id = ? ORDER BY e.created_at DESC`
     ).bind(ctx.user.tenant_id).all();
+
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'export', 'evidence', null,
+      { export_type: 'csv', record_count: results.results.length },
+      { dataClassification: 'sensitive' });
 
     return csvResponse(results.results, [
       { key: 'title', label: 'Title' }, { key: 'evidence_type', label: 'Type' },

@@ -29,6 +29,7 @@ import { OpsHandlers } from './handlers/ops.js';
 import { ExportHandlers } from './handlers/exports.js';
 import { ReportHandlers } from './handlers/reports.js';
 import { DocsHandlers } from './handlers/docs.js';
+import { TenantHandlers } from './handlers/tenant.js';
 import { jsonResponse, errorResponse, generateCsrfToken, validateCsrfToken } from './utils.js';
 
 export class Router {
@@ -59,6 +60,7 @@ export class Router {
       exports: new ExportHandlers(env),
       reports: new ReportHandlers(env),
       docs: new DocsHandlers(),
+      tenant: new TenantHandlers(env),
     };
 
     this.app = this._buildApp(handlers);
@@ -178,6 +180,9 @@ export class Router {
     // --- Evidence Routes ---
     app.get('/api/v1/evidence', (c) => h.evidence.list(c.get('ctx')));
     app.post('/api/v1/evidence', async (c) => h.evidence.create(c.get('ctx'), await withBody(c)));
+    app.post('/api/v1/evidence/upload', async (c) => h.evidence.upload(c.get('ctx'), c.req.raw));
+    app.get('/api/v1/evidence/:id/download', (c) => h.evidence.download(c.get('ctx'), c.req.param('id')));
+    app.get('/api/v1/evidence/:id/verify', (c) => h.evidence.verify(c.get('ctx'), c.req.param('id')));
     app.delete('/api/v1/evidence/:id', (c) => h.evidence.delete(c.get('ctx'), c.req.param('id')));
 
     // --- Notification Routes ---
@@ -205,6 +210,10 @@ export class Router {
 
     // --- Knowledge Base Routes ---
     app.get('/api/v1/knowledge-base', (c) => h.knowledgeBase.list(c.get('ctx')));
+
+    // --- Tenant Settings Routes ---
+    app.get('/api/v1/tenant/settings', (c) => h.tenant.getSettings(c.get('ctx')));
+    app.post('/api/v1/tenant/acknowledge-baa', (c) => h.tenant.acknowledgeBaa(c.get('ctx')));
 
     // --- Operations Dashboard Routes ---
     app.get('/api/v1/ops/metrics', (c) => h.ops.getMetrics(c.get('ctx')));
