@@ -101,10 +101,10 @@ jobs:
 
       - name: Smoke test staging
         run: |
-          STAGING_URL="${{ vars.STAGING_URL || 'https://staging.forgeai-govern.workers.dev' }}"
+          STAGING_URL="${{ vars.STAGING_URL || 'https://forgeai-govern-staging.workers.dev' }}"
           echo "Smoke testing: ${STAGING_URL}/api/v1/health"
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${STAGING_URL}/api/v1/health" || echo "000")
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${STAGING_URL}/api/v1/health" || echo "000")
             if [ "$STATUS" = "200" ]; then
               echo "Staging health check passed"
               exit 0
@@ -112,7 +112,7 @@ jobs:
             echo "Attempt $i: status=$STATUS, retrying in 5s..."
             sleep 5
           done
-          echo "::warning::Staging health check did not return 200 after 3 attempts"
+          echo "::warning::Staging health check did not return 200 after 5 attempts"
 
   deploy-production:
     needs: [deploy-staging]
@@ -143,10 +143,10 @@ jobs:
 
       - name: Smoke test production
         run: |
-          PROD_URL="${{ vars.PRODUCTION_URL || 'https://app.forgeai.com' }}"
+          PROD_URL="${{ vars.PRODUCTION_URL || 'https://forgeai-govern.workers.dev' }}"
           echo "Smoke testing: ${PROD_URL}/api/v1/health"
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${PROD_URL}/api/v1/health" || echo "000")
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${PROD_URL}/api/v1/health" || echo "000")
             if [ "$STATUS" = "200" ]; then
               echo "Production health check passed"
               exit 0
@@ -154,5 +154,5 @@ jobs:
             echo "Attempt $i: status=$STATUS, retrying in 10s..."
             sleep 10
           done
-          echo "::error::Production health check failed"
+          echo "::error::Production health check failed after 5 attempts"
           exit 1

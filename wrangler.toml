@@ -20,7 +20,7 @@ not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "production"
-ALLOWED_ORIGINS = "https://app.forgeai.com"
+ALLOWED_ORIGINS = "https://forgeai-govern.workers.dev,https://app.forgeai.com"
 
 # D1 SQLite Database
 # Create with: npx wrangler d1 create forgeai-govern-db
@@ -51,7 +51,7 @@ name = "forgeai-govern-staging"
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
-ALLOWED_ORIGINS = "https://staging.forgeai-govern.workers.dev"
+ALLOWED_ORIGINS = "https://forgeai-govern-staging.workers.dev"
 
 # Staging D1 — create with: npx wrangler d1 create forgeai-govern-db-staging
 # Then update database_id below
@@ -81,7 +81,7 @@ name = "forgeai-govern"
 
 [env.production.vars]
 ENVIRONMENT = "production"
-ALLOWED_ORIGINS = "https://app.forgeai.com"
+ALLOWED_ORIGINS = "https://forgeai-govern.workers.dev,https://app.forgeai.com"
 
 # Production D1 — use the same IDs as the top-level config
 [[env.production.d1_databases]]
