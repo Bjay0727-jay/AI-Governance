@@ -12,12 +12,6 @@ import { corsHeaders, jsonResponse, errorResponse } from './utils.js';
 
 export default {
   async fetch(request, env, ctx) {
-    // Validate JWT_SECRET is configured (fail loudly)
-    if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
-      console.error('FATAL: JWT_SECRET environment variable is not set or too short (minimum 32 characters). Use `wrangler secret put JWT_SECRET` to configure.');
-      return errorResponse('Server configuration error: authentication not available', 500, request, env);
-    }
-
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(request, env) });
@@ -25,7 +19,7 @@ export default {
 
     const url = new URL(request.url);
 
-    // Health check
+    // Health check — always available, even before secrets are configured
     if (url.pathname === '/api/v1/health') {
       return jsonResponse({
         status: 'healthy',
@@ -33,6 +27,12 @@ export default {
         timestamp: new Date().toISOString(),
         jwt_configured: !!(env.JWT_SECRET && env.JWT_SECRET.length >= 32),
       }, 200, request, env);
+    }
+
+    // Validate JWT_SECRET is configured (fail loudly for all other routes)
+    if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
+      console.error('FATAL: JWT_SECRET environment variable is not set or too short (minimum 32 characters). Use `wrangler secret put JWT_SECRET` to configure.');
+      return errorResponse('Server configuration error: authentication not available', 500, request, env);
     }
 
     // API routes handled by the router
