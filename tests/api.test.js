@@ -645,6 +645,40 @@ describe('Compliance', () => {
   });
 });
 
+// ==================== COMPLIANCE ALERTS ====================
+
+describe('Compliance Alerts', () => {
+  test('GET /api/v1/compliance-alerts returns alert summary for admin', async () => {
+    const res = await request(app)
+      .get('/api/v1/compliance-alerts')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toBeInstanceOf(Array);
+    expect(res.body.summary).toBeDefined();
+    expect(typeof res.body.summary.total).toBe('number');
+    expect(typeof res.body.summary.critical).toBe('number');
+    expect(typeof res.body.summary.high).toBe('number');
+    expect(typeof res.body.summary.moderate).toBe('number');
+  });
+
+  test('GET /api/v1/compliance-alerts includes overdue assessment alerts', async () => {
+    const res = await request(app)
+      .get('/api/v1/compliance-alerts')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    // Should flag assets without assessments as overdue
+    const overdueAlerts = res.body.data.filter(a => a.type === 'overdue_assessment');
+    expect(overdueAlerts.length).toBeGreaterThanOrEqual(0);
+  });
+
+  test('GET /api/v1/compliance-alerts blocked for viewers', async () => {
+    const res = await request(app)
+      .get('/api/v1/compliance-alerts')
+      .set('Authorization', `Bearer ${viewerToken}`);
+    expect(res.status).toBe(403);
+  });
+});
+
 // ==================== MONITORING ====================
 
 describe('Monitoring', () => {

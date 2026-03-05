@@ -38,6 +38,16 @@ VALUES
  'GOVERN 4.1', NULL, NULL, '164.308(a)(5)', '{"colorado": "SB 21-169 Sec 5"}', NULL,
  '["critical","high","moderate","low"]', 'Training', 'Deliver annual training with role-specific modules. Track completion rates.', 'Training materials, completion records, assessment results'),
 
+('c007', 'GOV-7', 'Govern', 'Governance Incentive Alignment',
+ 'Align organizational incentive structures—including performance evaluations, recognition programs, and accountability measures—to promote responsible AI practices.',
+ 'GOVERN 1.6', NULL, NULL, NULL, '{}', NULL,
+ '["critical","high","moderate"]', 'Organizational', 'Integrate AI governance adherence into personnel evaluations. Reward responsible AI innovation.', 'Performance review criteria, incentive program documentation, accountability records'),
+
+('c008', 'GOV-8', 'Govern', 'Governance Performance Metrics',
+ 'Define and track key performance indicators for the AI governance program including timeliness of assessments, control implementation rates, incident response times, and training completion.',
+ 'GOVERN 1.7', NULL, NULL, '164.308(a)(1)(ii)(D)', '{}', 'LD.04.04.05',
+ '["critical","high","moderate","low"]', 'Reporting', 'Establish governance KPIs and report quarterly. Set target thresholds and track improvement trends.', 'KPI dashboards, quarterly governance scorecards, trend analysis reports'),
+
 -- ============================================================================
 -- MAP FUNCTION - AI system categorization and context mapping
 -- ============================================================================
@@ -65,6 +75,21 @@ VALUES
  'Document the intended use, target population, clinical context, and known limitations for each AI system per ONC HTI-1 transparency requirements.',
  'MAP 2.2', 'Indications for Use', 'HTI-1 §170.315(b)(11)(iii)', NULL, '{}', NULL,
  '["critical","high","moderate"]', 'Documentation', 'Obtain and review vendor-provided intended use statements. Document local use cases.', 'Intended use statements, limitation documentation'),
+
+('c015', 'MAP-6', 'Map', 'Stakeholder Benefit and Risk Identification',
+ 'Identify and document expected benefits and potential risks to all stakeholders—including patients, clinicians, administrators, and community members—for each AI system.',
+ 'MAP 3.2', NULL, NULL, NULL, '{"colorado": "SB 21-169 Sec 4"}', NULL,
+ '["critical","high","moderate"]', 'Risk Analysis', 'Map positive and negative impacts per stakeholder group. Document risk-benefit trade-offs.', 'Stakeholder impact analyses, risk-benefit documentation'),
+
+('c016', 'MAP-7', 'Map', 'AI System Profiling and Characteristics',
+ 'Profile the technical characteristics, architecture, and operating parameters of each AI system to support risk assessment and measurement activities.',
+ 'MAP 4.1', NULL, NULL, NULL, '{}', NULL,
+ '["critical","high","moderate"]', 'Documentation', 'Document model type, architecture, training approach, key hyperparameters, and operating constraints.', 'System profile documents, technical architecture diagrams'),
+
+('c017', 'MAP-8', 'Map', 'Measurement Transition Planning',
+ 'Establish a clear handoff from the Map function to the Measure function, ensuring all context, risks, and stakeholder considerations inform the measurement strategy.',
+ 'MAP 5.1', NULL, NULL, NULL, '{}', NULL,
+ '["critical","high"]', 'Process', 'Create a measurement plan for each AI system that references Map outputs. Define metrics aligned with identified risks.', 'Measurement transition plans, metrics alignment documents'),
 
 -- ============================================================================
 -- MEASURE FUNCTION - Risk assessment and performance measurement
@@ -98,6 +123,16 @@ VALUES
  'Conduct periodic risk reassessments for all deployed AI systems on a schedule determined by risk tier: annually for low, semi-annually for moderate, quarterly for high/critical.',
  'MEASURE 1.2', 'Periodic Review', NULL, '164.308(a)(8)', '{}', NULL,
  '["critical","high","moderate","low"]', 'Risk Assessment', 'Maintain reassessment schedule. Document any risk tier changes and triggering factors.', 'Reassessment schedule, completed periodic assessments'),
+
+('c026', 'MEA-7', 'Measure', 'Measurement to Management Handoff',
+ 'Ensure measurement findings—including risk assessment results, performance metrics, and bias evaluations—are systematically communicated to the Manage function for action.',
+ 'MEASURE 4.1', NULL, NULL, NULL, '{}', NULL,
+ '["critical","high","moderate"]', 'Process', 'Create standardized reporting templates from Measure to Manage. Define escalation criteria for out-of-threshold metrics.', 'Handoff reports, escalation records, management action plans'),
+
+('c027', 'MEA-8', 'Measure', 'Measurement Result Documentation and Communication',
+ 'Document all measurement results and communicate findings to relevant stakeholders including governance committee, system owners, and affected clinical teams.',
+ 'MEASURE 4.2', NULL, NULL, '164.308(a)(1)(ii)(D)', '{}', NULL,
+ '["critical","high","moderate","low"]', 'Reporting', 'Publish measurement summaries after each assessment cycle. Archive results for trend analysis.', 'Measurement reports, stakeholder communications, trend analysis records'),
 
 -- ============================================================================
 -- MANAGE FUNCTION - Risk mitigation and ongoing management

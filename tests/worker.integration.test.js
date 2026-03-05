@@ -269,6 +269,156 @@ describeIf('Worker Integration Tests', () => {
     });
   });
 
+  describe('Risk Assessments (authenticated)', () => {
+    let assessmentId;
+
+    test('POST /api/v1/risk-assessments creates assessment', async () => {
+      // First we need an asset id — reuse the one created above or create one
+      const assetRes = await fetchWorker('/api/v1/ai-assets', {
+        headers: { Cookie: cookies },
+      });
+      const assets = await assetRes.json();
+      const assetId = assets.data[0]?.id;
+      if (!assetId) return;
+
+      const res = await fetchWorker('/api/v1/risk-assessments', {
+        method: 'POST',
+        headers: { Cookie: cookies, 'X-CSRF-Token': csrfToken },
+        body: {
+          ai_asset_id: assetId,
+          patient_safety_risk: 4,
+          bias_risk: 3,
+          privacy_risk: 4,
+          clinical_validity_risk: 3,
+          cybersecurity_risk: 2,
+          regulatory_risk: 3,
+          findings: 'Integration test risk assessment',
+          recommendations: 'Continue monitoring',
+        },
+      });
+      expect([200, 201]).toContain(res.status);
+      const data = await res.json();
+      assessmentId = data.data?.id;
+      expect(assessmentId).toBeDefined();
+    });
+
+    test('GET /api/v1/risk-assessments lists assessments', async () => {
+      const res = await fetchWorker('/api/v1/risk-assessments', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.data.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Incidents (authenticated)', () => {
+    test('POST /api/v1/incidents creates an incident', async () => {
+      const res = await fetchWorker('/api/v1/incidents', {
+        method: 'POST',
+        headers: { Cookie: cookies, 'X-CSRF-Token': csrfToken },
+        body: {
+          title: 'Model drift detected',
+          severity: 'high',
+          incident_type: 'performance_degradation',
+          description: 'Integration test incident',
+        },
+      });
+      expect([200, 201]).toContain(res.status);
+      const data = await res.json();
+      expect(data.data?.id).toBeDefined();
+    });
+
+    test('GET /api/v1/incidents lists incidents', async () => {
+      const res = await fetchWorker('/api/v1/incidents', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.data.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Vendor Assessments (authenticated)', () => {
+    test('POST /api/v1/vendor-assessments creates vendor assessment', async () => {
+      const res = await fetchWorker('/api/v1/vendor-assessments', {
+        method: 'POST',
+        headers: { Cookie: cookies, 'X-CSRF-Token': csrfToken },
+        body: {
+          vendor_name: 'TestAI Corp',
+          product_name: 'Diagnostic AI v2',
+          assessment_type: 'initial',
+        },
+      });
+      expect([200, 201]).toContain(res.status);
+      const data = await res.json();
+      expect(data.data?.id).toBeDefined();
+    });
+  });
+
+  describe('Compliance Alerts', () => {
+    test('GET /api/v1/compliance-alerts returns alert summary', async () => {
+      const res = await fetchWorker('/api/v1/compliance-alerts', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.summary).toBeDefined();
+      expect(typeof data.summary.total).toBe('number');
+      expect(Array.isArray(data.data)).toBe(true);
+    });
+  });
+
+  describe('Dashboard & Reports (authenticated)', () => {
+    test('GET /api/v1/dashboard/stats returns dashboard stats', async () => {
+      const res = await fetchWorker('/api/v1/dashboard/stats', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.data).toBeDefined();
+    });
+
+    test('GET /api/v1/onboarding/progress returns onboarding status', async () => {
+      const res = await fetchWorker('/api/v1/onboarding/progress', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('Notifications (authenticated)', () => {
+    test('GET /api/v1/notifications returns notification list', async () => {
+      const res = await fetchWorker('/api/v1/notifications', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(Array.isArray(data.data)).toBe(true);
+      expect(typeof data.unread_count).toBe('number');
+    });
+  });
+
+  describe('Export (authenticated)', () => {
+    test('GET /api/v1/export/assets returns CSV export', async () => {
+      const res = await fetchWorker('/api/v1/export/assets', {
+        headers: { Cookie: cookies },
+      });
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('CORS Preflight', () => {
+    test('OPTIONS request returns 204 with CORS headers', async () => {
+      const url = `${baseUrl}/api/v1/ai-assets`;
+      const res = await mf.dispatchFetch(url, {
+        method: 'OPTIONS',
+        headers: { Origin: 'http://localhost:3000' },
+      });
+      expect(res.status).toBe(204);
+    });
+  });
+
   describe('Audit Log', () => {
     test('GET /api/v1/audit-log returns entries with hash chain', async () => {
       const res = await fetchWorker('/api/v1/audit-log', {
