@@ -18,9 +18,11 @@ directory = "./src/frontend"
 html_handling = "auto-trailing-slash"
 not_found_handling = "single-page-application"
 
-# Nightly D1 backup at 2:00 AM UTC
-[triggers]
-crons = ["0 2 * * *"]
+# Nightly D1 backup: disabled due to account cron trigger limit (5 max on free plan).
+# To enable, remove other unused cron triggers then uncomment:
+# [triggers]
+# crons = ["0 2 * * *"]
+# Alternative: call the scheduled handler via Cloudflare API or external cron.
 
 [vars]
 ENVIRONMENT = "production"
