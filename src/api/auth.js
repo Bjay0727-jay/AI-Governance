@@ -16,7 +16,11 @@ const LOCKOUT_MINUTES = 30;
 export class AuthService {
   constructor(env) {
     this.db = env.DB;
-    this.jwtSecret = env.JWT_SECRET || 'forgeai-dev-secret-replace-in-production';
+    this.kv = env.SESSION_CACHE || null;
+    if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
+      throw new Error('JWT_SECRET must be configured and at least 32 characters. Use `wrangler secret put JWT_SECRET`.');
+    }
+    this.jwtSecret = env.JWT_SECRET;
   }
 
   // --- Password Hashing (PBKDF2-SHA256) ---
@@ -137,7 +141,7 @@ export class AuthService {
       ]);
 
       const accessToken = await this.createToken({ user_id: userId, tenant_id: tenantId, role: 'admin' }, ACCESS_TOKEN_EXPIRY);
-      const refreshToken = await this.createToken({ user_id: userId, tenant_id: tenantId, type: 'refresh' }, REFRESH_TOKEN_EXPIRY);
+      const refreshToken = await this.createToken({ user_id: userId, tenant_id: tenantId, type: 'refresh', jti: generateUUID() }, REFRESH_TOKEN_EXPIRY);
 
       await this.auditLog(tenantId, userId, 'register', 'tenant', tenantId, { organization: organization_name });
 
@@ -199,7 +203,7 @@ export class AuthService {
       ACCESS_TOKEN_EXPIRY
     );
     const refreshToken = await this.createToken(
-      { user_id: user.id, tenant_id: user.tenant_id, type: 'refresh' },
+      { user_id: user.id, tenant_id: user.tenant_id, type: 'refresh', jti: generateUUID() },
       REFRESH_TOKEN_EXPIRY
     );
 
@@ -228,6 +232,12 @@ export class AuthService {
     const payload = await this.verifyToken(refresh_token);
     if (!payload || payload.type !== 'refresh') return errorResponse('Invalid refresh token', 401);
 
+    // Check if token has been revoked
+    if (this.kv && payload.jti) {
+      const revoked = await this.kv.get(`revoked:${payload.jti}`);
+      if (revoked) return errorResponse('Token has been revoked', 401);
+    }
+
     const user = await this.db.prepare(
       `SELECT id, tenant_id, role FROM users WHERE id = ? AND status = 'active'`
     ).bind(payload.user_id).first();
@@ -238,11 +248,31 @@ export class AuthService {
       ACCESS_TOKEN_EXPIRY
     );
     const newRefresh = await this.createToken(
-      { user_id: user.id, tenant_id: user.tenant_id, type: 'refresh' },
+      { user_id: user.id, tenant_id: user.tenant_id, type: 'refresh', jti: generateUUID() },
       REFRESH_TOKEN_EXPIRY
     );
 
     return jsonResponse({ access_token: newAccess, refresh_token: newRefresh, token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
+  }
+
+  // --- Logout (Token Revocation) ---
+
+  async logout(body) {
+    const { refresh_token } = body;
+    if (!refresh_token) return errorResponse('Refresh token required', 400);
+
+    const payload = await this.verifyToken(refresh_token);
+    if (!payload || payload.type !== 'refresh') return errorResponse('Invalid refresh token', 401);
+
+    // Store revocation in KV with TTL matching token expiry
+    if (this.kv && payload.jti) {
+      const ttl = Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
+      if (ttl > 0) {
+        await this.kv.put(`revoked:${payload.jti}`, 'true', { expirationTtl: ttl });
+      }
+    }
+
+    return jsonResponse({ message: 'Logged out successfully' });
   }
 
   // --- Audit Logging ---

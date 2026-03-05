@@ -18,6 +18,7 @@ not_found_handling = "single-page-application"
 
 [vars]
 ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://app.forgeai.com"
 
 # D1 SQLite Database
 # Create with: npx wrangler d1 create forgeai-govern-db

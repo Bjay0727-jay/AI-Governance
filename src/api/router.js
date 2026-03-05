@@ -27,7 +27,7 @@ import { OpsHandlers } from './handlers/ops.js';
 import { ExportHandlers } from './handlers/exports.js';
 import { ReportHandlers } from './handlers/reports.js';
 import { DocsHandlers } from './handlers/docs.js';
-import { jsonResponse, errorResponse } from './utils.js';
+import { jsonResponse, errorResponse, generateCsrfToken, validateCsrfToken } from './utils.js';
 
 export class Router {
   constructor(env) {
@@ -71,17 +71,30 @@ export class Router {
     if (path === '/api/v1/auth/refresh' && method === 'POST') {
       return this.auth.refresh(await request.json());
     }
+    if (path === '/api/v1/auth/logout' && method === 'POST') {
+      return this.auth.logout(await request.json());
+    }
     if (path === '/api/v1/docs' && method === 'GET') {
       return this.docs.getDocs();
     }
     if (path === '/api/v1/csrf-token' && method === 'GET') {
-      const token = [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, '0')).join('');
+      const csrfSecret = this.env.JWT_SECRET; // Reuse JWT secret for CSRF HMAC
+      const token = await generateCsrfToken(csrfSecret);
       return jsonResponse({ csrf_token: token });
     }
 
     // --- All other routes require authentication ---
     const user = await this.auth.authenticate(request);
     if (!user) return errorResponse('Authentication required', 401);
+
+    // --- CSRF validation on state-changing requests ---
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const csrfToken = request.headers.get('X-CSRF-Token');
+      const csrfSecret = this.env.JWT_SECRET;
+      if (!csrfToken || !(await validateCsrfToken(csrfToken, csrfSecret))) {
+        return errorResponse('Invalid or missing CSRF token', 403);
+      }
+    }
 
     const ctx = { user, db: this.env.DB, url, auth: this.auth };
     let body = null;
