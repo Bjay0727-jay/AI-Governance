@@ -4,12 +4,22 @@
  * Tests the Cloudflare Worker code paths (router, auth, handlers) using
  * Miniflare's local simulation of Workers runtime, D1, R2, and KV.
  *
- * Run: npx jest tests/worker.integration.test.js
+ * Run: npm run test:integration (requires miniflare: npm install)
  */
 
-const { Miniflare } = require('miniflare');
 const path = require('path');
 const fs = require('fs');
+
+let Miniflare;
+try {
+  Miniflare = require('miniflare').Miniflare;
+} catch {
+  // Miniflare not installed
+}
+
+const SKIP = !Miniflare;
+
+const describeIf = SKIP ? describe.skip : describe;
 
 let mf;
 let baseUrl;
@@ -24,6 +34,8 @@ function readSqlFile(filePath) {
 }
 
 beforeAll(async () => {
+  if (SKIP) return;
+
   mf = new Miniflare({
     scriptPath: path.join(__dirname, '..', 'src', 'api', 'worker.js'),
     modules: true,
@@ -83,7 +95,7 @@ async function fetchWorker(path, options = {}) {
   });
 }
 
-describe('Worker Integration Tests', () => {
+describeIf('Worker Integration Tests', () => {
   let cookies = '';
   let csrfToken = '';
 
@@ -114,9 +126,10 @@ describe('Worker Integration Tests', () => {
       expect(data.user.email).toBe('admin@test.hospital.org');
       expect(data.user.role).toBe('admin');
       expect(data.tenant.name).toBe('Test Hospital');
+      expect(data.access_token).toBeDefined();
 
       // Verify httpOnly cookies are set
-      const setCookies = res.headers.getAll?.('Set-Cookie') || [res.headers.get('Set-Cookie')].filter(Boolean);
+      const setCookies = res.headers.getSetCookie?.() || [];
       const cookieStr = setCookies.join('; ');
       expect(cookieStr).toContain('forgeai_access=');
       expect(cookieStr).toContain('HttpOnly');
@@ -136,8 +149,9 @@ describe('Worker Integration Tests', () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.user.role).toBe('admin');
+      expect(data.access_token).toBeDefined();
 
-      const setCookies = res.headers.getAll?.('Set-Cookie') || [res.headers.get('Set-Cookie')].filter(Boolean);
+      const setCookies = res.headers.getSetCookie?.() || [];
       cookies = setCookies.map(c => c.split(';')[0]).join('; ');
     });
 
@@ -171,7 +185,6 @@ describe('Worker Integration Tests', () => {
           description: 'ML model for early sepsis detection',
         },
       });
-      // CSRF is disabled in test environment, so this should work
       expect([200, 201]).toContain(res.status);
       const data = await res.json();
       expect(data.data.name).toBe('Sepsis Prediction Model');
@@ -227,8 +240,6 @@ describe('Worker Integration Tests', () => {
       const res = await fetchWorker('/api/v1/ai-assets', {
         headers: { Cookie: cookies },
       });
-      // Rate limiting may or may not be active depending on KV availability
-      // Just verify the request succeeds
       expect(res.status).toBe(200);
     });
   });
