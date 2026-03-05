@@ -166,7 +166,11 @@ export class RiskAssessmentHandlers {
       `UPDATE risk_assessments SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`
     ).bind(...values, id, ctx.user.tenant_id).run();
 
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'risk_assessment', id, {});
+    const changedFields = Object.keys(body);
+    const before = {};
+    const after = {};
+    for (const f of changedFields) { before[f] = existing[f]; after[f] = body[f]; }
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'risk_assessment', id, { updated_fields: changedFields, before, after });
     const updated = await this.db.prepare('SELECT * FROM risk_assessments WHERE id = ?').bind(id).first();
     return jsonResponse({ data: updated });
   }
@@ -194,7 +198,10 @@ export class RiskAssessmentHandlers {
       ).bind(existing.overall_risk_level, existing.ai_asset_id).run();
     }
 
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, newStatus, 'risk_assessment', id, {});
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, newStatus, 'risk_assessment', id, {
+      before: { status: existing.status, approved_by: existing.approved_by },
+      after: { status: newStatus, approved_by: ctx.user.user_id, review_notes: body.review_notes || null },
+    });
     return jsonResponse({ message: `Assessment ${newStatus}` });
   }
 }

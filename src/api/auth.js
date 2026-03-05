@@ -2,7 +2,8 @@
  * ForgeAI Govern™ - Authentication & Authorization Service
  *
  * JWT-based stateless auth with PBKDF2-SHA256 password hashing.
- * Implements: 15-min access tokens, 7-day refresh rotation, account lockout.
+ * Implements: httpOnly cookie tokens, 15-min access, 7-day refresh rotation,
+ * account lockout, and TOTP MFA for privileged roles.
  */
 
 import { generateUUID, jsonResponse, errorResponse, validateEmail } from './utils.js';
@@ -12,15 +13,112 @@ const ACCESS_TOKEN_EXPIRY = 15 * 60; // 15 minutes in seconds
 const REFRESH_TOKEN_EXPIRY = 7 * 24 * 60 * 60; // 7 days
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 30;
+const MFA_WINDOW = 1; // TOTP time-step window tolerance (±30s)
+const MFA_REQUIRED_ROLES = ['admin', 'governance_lead'];
+const TOTP_PERIOD = 30;
+const TOTP_DIGITS = 6;
+
+// --- Cookie Helpers ---
+
+function setTokenCookies(response, accessToken, refreshToken, isSecure = true) {
+  const cookieOpts = `HttpOnly; SameSite=Strict; Path=/api${isSecure ? '; Secure' : ''}`;
+  const headers = new Headers(response.headers);
+  headers.append('Set-Cookie', `forgeai_access=${accessToken}; Max-Age=${ACCESS_TOKEN_EXPIRY}; ${cookieOpts}`);
+  headers.append('Set-Cookie', `forgeai_refresh=${refreshToken}; Max-Age=${REFRESH_TOKEN_EXPIRY}; ${cookieOpts}; Path=/api/v1/auth`);
+  return new Response(response.body, { status: response.status, headers });
+}
+
+function clearTokenCookies(response, isSecure = true) {
+  const cookieOpts = `HttpOnly; SameSite=Strict; Path=/api${isSecure ? '; Secure' : ''}`;
+  const headers = new Headers(response.headers);
+  headers.append('Set-Cookie', `forgeai_access=; Max-Age=0; ${cookieOpts}`);
+  headers.append('Set-Cookie', `forgeai_refresh=; Max-Age=0; ${cookieOpts}; Path=/api/v1/auth`);
+  return new Response(response.body, { status: response.status, headers });
+}
+
+function parseCookies(request) {
+  const header = request.headers.get('Cookie') || '';
+  const cookies = {};
+  for (const part of header.split(';')) {
+    const [key, ...rest] = part.trim().split('=');
+    if (key) cookies[key.trim()] = rest.join('=').trim();
+  }
+  return cookies;
+}
+
+// --- TOTP Helpers ---
+
+async function hmacSha1(key, message) {
+  const cryptoKey = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, message));
+}
+
+function base32Decode(str) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const c of str.toUpperCase().replace(/=+$/, '')) {
+    const val = alphabet.indexOf(c);
+    if (val === -1) continue;
+    bits += val.toString(2).padStart(5, '0');
+  }
+  const bytes = new Uint8Array(Math.floor(bits.length / 8));
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
+  }
+  return bytes;
+}
+
+function base32Encode(buffer) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const byte of buffer) {
+    bits += byte.toString(2).padStart(8, '0');
+  }
+  let result = '';
+  for (let i = 0; i < bits.length; i += 5) {
+    const chunk = bits.slice(i, i + 5).padEnd(5, '0');
+    result += alphabet[parseInt(chunk, 2)];
+  }
+  return result;
+}
+
+async function generateTOTP(secret, time = Date.now()) {
+  const key = base32Decode(secret);
+  const counter = Math.floor(time / 1000 / TOTP_PERIOD);
+  const counterBytes = new Uint8Array(8);
+  let tmp = counter;
+  for (let i = 7; i >= 0; i--) {
+    counterBytes[i] = tmp & 0xff;
+    tmp = Math.floor(tmp / 256);
+  }
+  const hash = await hmacSha1(key, counterBytes);
+  const offset = hash[hash.length - 1] & 0xf;
+  const code = ((hash[offset] & 0x7f) << 24 | hash[offset + 1] << 16 | hash[offset + 2] << 8 | hash[offset + 3]) % (10 ** TOTP_DIGITS);
+  return code.toString().padStart(TOTP_DIGITS, '0');
+}
+
+async function verifyTOTP(secret, token, window = MFA_WINDOW) {
+  const now = Date.now();
+  for (let i = -window; i <= window; i++) {
+    const expected = await generateTOTP(secret, now + i * TOTP_PERIOD * 1000);
+    if (expected === token) return true;
+  }
+  return false;
+}
 
 export class AuthService {
   constructor(env) {
     this.db = env.DB;
     this.kv = env.SESSION_CACHE || null;
+    this.env = env;
     if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
       throw new Error('JWT_SECRET must be configured and at least 32 characters. Use `wrangler secret put JWT_SECRET`.');
     }
     this.jwtSecret = env.JWT_SECRET;
+  }
+
+  _isSecure() {
+    return this.env.ENVIRONMENT !== 'test' && this.env.ENVIRONMENT !== 'development';
   }
 
   // --- Password Hashing (PBKDF2-SHA256) ---
@@ -102,14 +200,19 @@ export class AuthService {
   // --- Auth Middleware ---
 
   async authenticate(request) {
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.slice(7);
+    // Try httpOnly cookie first, then fall back to Authorization header
+    const cookies = parseCookies(request);
+    let token = cookies.forgeai_access;
+    if (!token) {
+      const authHeader = request.headers.get('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+      }
+    }
+    if (!token) return null;
     const payload = await this.verifyToken(token);
     if (!payload) return null;
-    // Reject refresh tokens used as access tokens
     if (payload.type && payload.type !== 'access') return null;
-    // Require essential claims
     if (!payload.user_id || !payload.tenant_id) return null;
     return payload;
   }
@@ -151,14 +254,13 @@ export class AuthService {
 
       await this.auditLog(tenantId, userId, 'register', 'tenant', tenantId, { organization: organization_name });
 
-      return jsonResponse({
-        access_token: accessToken,
-        refresh_token: refreshToken,
+      const resp = jsonResponse({
         token_type: 'Bearer',
         expires_in: ACCESS_TOKEN_EXPIRY,
-        user: { id: userId, email, first_name, last_name, role: 'admin' },
+        user: { id: userId, email, first_name, last_name, role: 'admin', mfa_enabled: false },
         tenant: { id: tenantId, name: organization_name, slug },
       }, 201);
+      return setTokenCookies(resp, accessToken, refreshToken, this._isSecure());
     } catch (error) {
       if (error.message?.includes('UNIQUE')) return errorResponse('Organization or email already exists', 409);
       throw error;
@@ -168,7 +270,7 @@ export class AuthService {
   // --- Login ---
 
   async login(body, request) {
-    const { email, password } = body;
+    const { email, password, mfa_code } = body;
     if (!email || !password) return errorResponse('Email and password required', 400);
 
     const user = await this.db.prepare(
@@ -199,6 +301,15 @@ export class AuthService {
       return errorResponse('Invalid credentials', 401);
     }
 
+    // MFA enforcement for privileged roles
+    if (user.mfa_enabled && user.mfa_secret) {
+      if (!mfa_code) {
+        return jsonResponse({ mfa_required: true, message: 'MFA code required' }, 200);
+      }
+      const valid = await verifyTOTP(user.mfa_secret, mfa_code);
+      if (!valid) return errorResponse('Invalid MFA code', 401);
+    }
+
     // Successful login - reset attempts
     await this.db.prepare(
       `UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login = datetime('now'), status = 'active' WHERE id = ?`
@@ -216,9 +327,9 @@ export class AuthService {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
     await this.auditLog(user.tenant_id, user.id, 'login', 'user', user.id, { ip });
 
-    return jsonResponse({
-      access_token: accessToken,
-      refresh_token: refreshToken,
+    const mfaRequired = MFA_REQUIRED_ROLES.includes(user.role) && !user.mfa_enabled;
+
+    const resp = jsonResponse({
       token_type: 'Bearer',
       expires_in: ACCESS_TOKEN_EXPIRY,
       user: {
@@ -226,16 +337,20 @@ export class AuthService {
         last_name: user.last_name, role: user.role, mfa_enabled: !!user.mfa_enabled,
       },
       tenant: { id: user.tenant_id, name: user.tenant_name, slug: user.tenant_slug },
+      mfa_enrollment_required: mfaRequired,
     });
+    return setTokenCookies(resp, accessToken, refreshToken, this._isSecure());
   }
 
   // --- Token Refresh ---
 
-  async refresh(body) {
-    const { refresh_token } = body;
-    if (!refresh_token) return errorResponse('Refresh token required', 400);
+  async refresh(body, request) {
+    // Try cookie first, then body
+    const cookies = parseCookies(request);
+    const refreshTokenValue = cookies.forgeai_refresh || body?.refresh_token;
+    if (!refreshTokenValue) return errorResponse('Refresh token required', 400);
 
-    const payload = await this.verifyToken(refresh_token);
+    const payload = await this.verifyToken(refreshTokenValue);
     if (!payload || payload.type !== 'refresh') return errorResponse('Invalid refresh token', 401);
 
     // Check if token has been revoked
@@ -258,27 +373,85 @@ export class AuthService {
       REFRESH_TOKEN_EXPIRY
     );
 
-    return jsonResponse({ access_token: newAccess, refresh_token: newRefresh, token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
+    const resp = jsonResponse({ token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
+    return setTokenCookies(resp, newAccess, newRefresh, this._isSecure());
   }
 
   // --- Logout (Token Revocation) ---
 
-  async logout(body) {
-    const { refresh_token } = body;
-    if (!refresh_token) return errorResponse('Refresh token required', 400);
+  async logout(body, request) {
+    const cookies = parseCookies(request);
+    const refreshTokenValue = cookies.forgeai_refresh || body?.refresh_token;
 
-    const payload = await this.verifyToken(refresh_token);
-    if (!payload || payload.type !== 'refresh') return errorResponse('Invalid refresh token', 401);
-
-    // Store revocation in KV with TTL matching token expiry
-    if (this.kv && payload.jti) {
-      const ttl = Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
-      if (ttl > 0) {
-        await this.kv.put(`revoked:${payload.jti}`, 'true', { expirationTtl: ttl });
+    if (refreshTokenValue) {
+      const payload = await this.verifyToken(refreshTokenValue);
+      if (payload && payload.type === 'refresh' && this.kv && payload.jti) {
+        const ttl = Math.max(0, payload.exp - Math.floor(Date.now() / 1000));
+        if (ttl > 0) {
+          await this.kv.put(`revoked:${payload.jti}`, 'true', { expirationTtl: ttl });
+        }
       }
     }
 
-    return jsonResponse({ message: 'Logged out successfully' });
+    const resp = jsonResponse({ message: 'Logged out successfully' });
+    return clearTokenCookies(resp, this._isSecure());
+  }
+
+  // --- MFA Enrollment ---
+
+  async mfaEnroll(ctx) {
+    const user = await this.db.prepare('SELECT id, email, mfa_enabled FROM users WHERE id = ? AND tenant_id = ?')
+      .bind(ctx.user.user_id, ctx.user.tenant_id).first();
+    if (!user) return errorResponse('User not found', 404);
+    if (user.mfa_enabled) return errorResponse('MFA is already enabled', 400);
+
+    const secret = base32Encode(crypto.getRandomValues(new Uint8Array(20)));
+    // Store provisionally — not yet confirmed
+    await this.db.prepare('UPDATE users SET mfa_secret = ? WHERE id = ?').bind(secret, user.id).run();
+
+    const otpauthUrl = `otpauth://totp/ForgeAI%20Govern:${encodeURIComponent(user.email)}?secret=${secret}&issuer=ForgeAI%20Govern&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD}`;
+
+    return jsonResponse({
+      secret,
+      otpauth_url: otpauthUrl,
+      message: 'Scan the QR code with your authenticator app, then confirm with POST /api/v1/auth/mfa/verify',
+    });
+  }
+
+  async mfaVerify(ctx, body) {
+    const { code } = body;
+    if (!code) return errorResponse('MFA code required', 400);
+
+    const user = await this.db.prepare('SELECT id, mfa_secret, mfa_enabled FROM users WHERE id = ? AND tenant_id = ?')
+      .bind(ctx.user.user_id, ctx.user.tenant_id).first();
+    if (!user) return errorResponse('User not found', 404);
+    if (!user.mfa_secret) return errorResponse('MFA enrollment not started. Call POST /api/v1/auth/mfa/enroll first.', 400);
+    if (user.mfa_enabled) return errorResponse('MFA is already enabled', 400);
+
+    const valid = await verifyTOTP(user.mfa_secret, code);
+    if (!valid) return errorResponse('Invalid MFA code. Please try again.', 400);
+
+    await this.db.prepare('UPDATE users SET mfa_enabled = 1 WHERE id = ?').bind(user.id).run();
+    await this.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'mfa_enable', 'user', user.id, {});
+
+    return jsonResponse({ message: 'MFA enabled successfully' });
+  }
+
+  async mfaDisable(ctx, body) {
+    const { code } = body;
+    if (!code) return errorResponse('Current MFA code required to disable MFA', 400);
+
+    const user = await this.db.prepare('SELECT id, mfa_secret, mfa_enabled FROM users WHERE id = ? AND tenant_id = ?')
+      .bind(ctx.user.user_id, ctx.user.tenant_id).first();
+    if (!user || !user.mfa_enabled) return errorResponse('MFA is not enabled', 400);
+
+    const valid = await verifyTOTP(user.mfa_secret, code);
+    if (!valid) return errorResponse('Invalid MFA code', 401);
+
+    await this.db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL WHERE id = ?').bind(user.id).run();
+    await this.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'mfa_disable', 'user', user.id, {});
+
+    return jsonResponse({ message: 'MFA disabled' });
   }
 
   // --- Audit Logging with Cryptographic Hash Chaining ---

@@ -96,7 +96,12 @@ export class UserHandlers {
     await this.db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`)
       .bind(...values, id, ctx.user.tenant_id).run();
 
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'user', id, { fields: Object.keys(body) });
+    const changedFields = Object.keys(body).filter(f => f !== 'password');
+    const before = {};
+    const after = {};
+    for (const f of changedFields) { before[f] = existing[f]; after[f] = body[f]; }
+    if (body.password) { changedFields.push('password'); before.password = '[redacted]'; after.password = '[redacted]'; }
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'user', id, { updated_fields: changedFields, before, after });
 
     const updated = await this.db.prepare(
       `SELECT id, email, first_name, last_name, role, mfa_enabled, status, last_login, created_at, updated_at
