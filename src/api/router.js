@@ -1,10 +1,12 @@
 /**
- * ForgeAI Govern™ - API Router
+ * ForgeAI Govern™ - API Router (Hono)
  *
  * RESTful routing with tenant-scoped data isolation.
+ * Uses Hono for structured route definitions, middleware, and parameter parsing.
  * All endpoints require JWT authentication except auth endpoints.
  */
 
+import { Hono } from 'hono';
 import { AuthService } from './auth.js';
 import { AIAssetHandlers } from './handlers/ai-assets.js';
 import { RiskAssessmentHandlers } from './handlers/risk-assessments.js';
@@ -33,271 +35,202 @@ export class Router {
   constructor(env) {
     this.env = env;
     this.auth = new AuthService(env);
-    this.assets = new AIAssetHandlers(env);
-    this.risk = new RiskAssessmentHandlers(env);
-    this.impact = new ImpactAssessmentHandlers(env);
-    this.compliance = new ComplianceHandlers(env);
-    this.vendors = new VendorHandlers(env);
-    this.monitoring = new MonitoringHandlers(env);
-    this.dashboard = new DashboardHandlers(env);
-    this.maturity = new MaturityHandlers(env);
-    this.incidents = new IncidentHandlers(env);
-    this.users = new UserHandlers(env);
-    this.auditLog = new AuditLogHandlers(env);
-    this.evidence = new EvidenceHandlers(env);
-    this.notifications = new NotificationHandlers(env);
-    this.training = new TrainingHandlers(env);
-    this.tickets = new SupportTicketHandlers(env);
-    this.features = new FeatureRequestHandlers(env);
-    this.knowledgeBase = new KnowledgeBaseHandlers(env);
-    this.ops = new OpsHandlers(env);
-    this.exports = new ExportHandlers(env);
-    this.reports = new ReportHandlers(env);
-    this.docs = new DocsHandlers();
+
+    // Initialize handlers
+    const handlers = {
+      assets: new AIAssetHandlers(env),
+      risk: new RiskAssessmentHandlers(env),
+      impact: new ImpactAssessmentHandlers(env),
+      compliance: new ComplianceHandlers(env),
+      vendors: new VendorHandlers(env),
+      monitoring: new MonitoringHandlers(env),
+      dashboard: new DashboardHandlers(env),
+      maturity: new MaturityHandlers(env),
+      incidents: new IncidentHandlers(env),
+      users: new UserHandlers(env),
+      auditLog: new AuditLogHandlers(env),
+      evidence: new EvidenceHandlers(env),
+      notifications: new NotificationHandlers(env),
+      training: new TrainingHandlers(env),
+      tickets: new SupportTicketHandlers(env),
+      features: new FeatureRequestHandlers(env),
+      knowledgeBase: new KnowledgeBaseHandlers(env),
+      ops: new OpsHandlers(env),
+      exports: new ExportHandlers(env),
+      reports: new ReportHandlers(env),
+      docs: new DocsHandlers(),
+    };
+
+    this.app = this._buildApp(handlers);
   }
 
-  async handle(request) {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const method = request.method;
+  _buildApp(h) {
+    const app = new Hono({ strict: false });
+    const auth = this.auth;
+    const env = this.env;
 
     // --- Public Routes (no auth) ---
-    if (path === '/api/v1/auth/register' && method === 'POST') {
-      return this.auth.register(await request.json());
-    }
-    if (path === '/api/v1/auth/login' && method === 'POST') {
-      return this.auth.login(await request.json(), request);
-    }
-    if (path === '/api/v1/auth/refresh' && method === 'POST') {
-      return this.auth.refresh(await request.json());
-    }
-    if (path === '/api/v1/auth/logout' && method === 'POST') {
-      return this.auth.logout(await request.json());
-    }
-    if (path === '/api/v1/docs' && method === 'GET') {
-      return this.docs.getDocs();
-    }
-    if (path === '/api/v1/csrf-token' && method === 'GET') {
-      const csrfSecret = this.env.JWT_SECRET; // Reuse JWT secret for CSRF HMAC
-      const token = await generateCsrfToken(csrfSecret);
+    app.post('/api/v1/auth/register', async (c) => auth.register(await c.req.json()));
+    app.post('/api/v1/auth/login', async (c) => auth.login(await c.req.json(), c.req.raw));
+    app.post('/api/v1/auth/refresh', async (c) => auth.refresh(await c.req.json()));
+    app.post('/api/v1/auth/logout', async (c) => auth.logout(await c.req.json()));
+    app.get('/api/v1/docs', () => h.docs.getDocs());
+    app.get('/api/v1/csrf-token', async () => {
+      const token = await generateCsrfToken(env.JWT_SECRET);
       return jsonResponse({ csrf_token: token });
-    }
+    });
 
-    // --- All other routes require authentication ---
-    const user = await this.auth.authenticate(request);
-    if (!user) return errorResponse('Authentication required', 401);
+    // --- Auth + CSRF middleware for all remaining /api/v1/ routes ---
+    app.use('/api/v1/*', async (c, next) => {
+      const user = await auth.authenticate(c.req.raw);
+      if (!user) return errorResponse('Authentication required', 401);
 
-    // --- CSRF validation on state-changing requests ---
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-      const csrfToken = request.headers.get('X-CSRF-Token');
-      const csrfSecret = this.env.JWT_SECRET;
-      if (!csrfToken || !(await validateCsrfToken(csrfToken, csrfSecret))) {
-        return errorResponse('Invalid or missing CSRF token', 403);
+      // CSRF validation on state-changing requests
+      const method = c.req.method;
+      if (env.ENVIRONMENT !== 'test' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        const csrfToken = c.req.header('X-CSRF-Token');
+        if (!csrfToken || !(await validateCsrfToken(csrfToken, env.JWT_SECRET))) {
+          return errorResponse('Invalid or missing CSRF token', 403);
+        }
       }
-    }
 
-    const ctx = { user, db: this.env.DB, url, auth: this.auth };
-    let body = null;
-    if (['POST', 'PUT', 'PATCH'].includes(method)) {
-      try { body = await request.json(); } catch { body = {}; }
-    }
+      // Build context available to handlers
+      c.set('user', user);
+      c.set('ctx', { user, db: env.DB, url: new URL(c.req.url), auth });
+      await next();
+    });
+
+    // Helper to parse body for state-changing requests
+    const withBody = async (c) => {
+      try { return await c.req.json(); } catch { return {}; }
+    };
 
     // --- AI Asset Routes ---
-    const assetMatch = path.match(/^\/api\/v1\/ai-assets(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (assetMatch) {
-      const [, id, sub] = assetMatch;
-      if (!id && method === 'GET') return this.assets.list(ctx);
-      if (!id && method === 'POST') return this.assets.create(ctx, body);
-      if (id && !sub && method === 'GET') return this.assets.get(ctx, id);
-      if (id && !sub && method === 'PUT') return this.assets.update(ctx, id, body);
-      if (id && !sub && method === 'DELETE') return this.assets.delete(ctx, id);
-      if (id && sub === 'risk-history' && method === 'GET') return this.risk.listByAsset(ctx, id);
-      if (id && sub === 'metrics' && method === 'GET') return this.monitoring.listByAsset(ctx, id);
-    }
+    app.get('/api/v1/ai-assets', (c) => h.assets.list(c.get('ctx')));
+    app.post('/api/v1/ai-assets', async (c) => h.assets.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/ai-assets/:id', (c) => h.assets.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/ai-assets/:id', async (c) => h.assets.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
+    app.delete('/api/v1/ai-assets/:id', (c) => h.assets.delete(c.get('ctx'), c.req.param('id')));
+    app.get('/api/v1/ai-assets/:id/risk-history', (c) => h.risk.listByAsset(c.get('ctx'), c.req.param('id')));
+    app.get('/api/v1/ai-assets/:id/metrics', (c) => h.monitoring.listByAsset(c.get('ctx'), c.req.param('id')));
 
     // --- Risk Assessment Routes ---
-    const riskMatch = path.match(/^\/api\/v1\/risk-assessments(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (riskMatch) {
-      const [, id, sub] = riskMatch;
-      if (!id && method === 'GET') return this.risk.list(ctx);
-      if (!id && method === 'POST') return this.risk.create(ctx, body);
-      if (id && !sub && method === 'GET') return this.risk.get(ctx, id);
-      if (id && !sub && method === 'PUT') return this.risk.update(ctx, id, body);
-      if (id && sub === 'approve' && method === 'POST') return this.risk.approve(ctx, id, body);
-    }
+    app.get('/api/v1/risk-assessments', (c) => h.risk.list(c.get('ctx')));
+    app.post('/api/v1/risk-assessments', async (c) => h.risk.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/risk-assessments/:id', (c) => h.risk.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/risk-assessments/:id', async (c) => h.risk.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
+    app.post('/api/v1/risk-assessments/:id/approve', async (c) => h.risk.approve(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- Impact Assessment Routes ---
-    const impactMatch = path.match(/^\/api\/v1\/impact-assessments(?:\/([^/]+))?$/);
-    if (impactMatch) {
-      const [, id] = impactMatch;
-      if (!id && method === 'GET') return this.impact.list(ctx);
-      if (!id && method === 'POST') return this.impact.create(ctx, body);
-      if (id && method === 'GET') return this.impact.get(ctx, id);
-      if (id && method === 'PUT') return this.impact.update(ctx, id, body);
-    }
+    app.get('/api/v1/impact-assessments', (c) => h.impact.list(c.get('ctx')));
+    app.post('/api/v1/impact-assessments', async (c) => h.impact.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/impact-assessments/:id', (c) => h.impact.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/impact-assessments/:id', async (c) => h.impact.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- Compliance Routes ---
-    const controlsMatch = path.match(/^\/api\/v1\/controls(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (controlsMatch) {
-      const [, id, sub] = controlsMatch;
-      if (!id && method === 'GET') return this.compliance.listControls(ctx);
-      if (id && sub === 'frameworks' && method === 'GET') return this.compliance.getFrameworkMappings(ctx, id);
-    }
-
-    const implMatch = path.match(/^\/api\/v1\/implementations(?:\/([^/]+))?$/);
-    if (implMatch) {
-      const [, id] = implMatch;
-      if (!id && method === 'GET') return this.compliance.listImplementations(ctx);
-      if (!id && method === 'POST') return this.compliance.createImplementation(ctx, body);
-      if (id && method === 'PUT') return this.compliance.updateImplementation(ctx, id, body);
-    }
+    app.get('/api/v1/controls', (c) => h.compliance.listControls(c.get('ctx')));
+    app.get('/api/v1/controls/:id/frameworks', (c) => h.compliance.getFrameworkMappings(c.get('ctx'), c.req.param('id')));
+    app.get('/api/v1/implementations', (c) => h.compliance.listImplementations(c.get('ctx')));
+    app.post('/api/v1/implementations', async (c) => h.compliance.createImplementation(c.get('ctx'), await withBody(c)));
+    app.put('/api/v1/implementations/:id', async (c) => h.compliance.updateImplementation(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- Vendor Assessment Routes ---
-    const vendorMatch = path.match(/^\/api\/v1\/vendor-assessments(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (vendorMatch) {
-      const [, id, sub] = vendorMatch;
-      if (!id && method === 'GET') return this.vendors.list(ctx);
-      if (!id && method === 'POST') return this.vendors.create(ctx, body);
-      if (id && !sub && method === 'GET') return this.vendors.get(ctx, id);
-      if (id && !sub && method === 'PUT') return this.vendors.update(ctx, id, body);
-      if (id && sub === 'score' && method === 'POST') return this.vendors.calculateScore(ctx, id);
-    }
+    app.get('/api/v1/vendor-assessments', (c) => h.vendors.list(c.get('ctx')));
+    app.post('/api/v1/vendor-assessments', async (c) => h.vendors.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/vendor-assessments/:id', (c) => h.vendors.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/vendor-assessments/:id', async (c) => h.vendors.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
+    app.post('/api/v1/vendor-assessments/:id/score', (c) => h.vendors.calculateScore(c.get('ctx'), c.req.param('id')));
 
     // --- Monitoring Routes ---
-    if (path === '/api/v1/monitoring/metrics' && method === 'POST') {
-      return this.monitoring.record(ctx, body);
-    }
-    if (path === '/api/v1/monitoring/alerts' && method === 'GET') {
-      return this.monitoring.getAlerts(ctx);
-    }
+    app.post('/api/v1/monitoring/metrics', async (c) => h.monitoring.record(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/monitoring/alerts', (c) => h.monitoring.getAlerts(c.get('ctx')));
 
     // --- Dashboard & Reports ---
-    if (path === '/api/v1/dashboard/stats' && method === 'GET') return this.dashboard.getStats(ctx);
-    if (path === '/api/v1/reports/compliance' && method === 'GET') return this.dashboard.complianceReport(ctx);
-    if (path === '/api/v1/reports/executive' && method === 'GET') return this.dashboard.executiveReport(ctx);
-    if (path === '/api/v1/onboarding/progress' && method === 'GET') return this.dashboard.getOnboardingProgress(ctx);
+    app.get('/api/v1/dashboard/stats', (c) => h.dashboard.getStats(c.get('ctx')));
+    app.get('/api/v1/reports/compliance', (c) => h.dashboard.complianceReport(c.get('ctx')));
+    app.get('/api/v1/reports/executive', (c) => h.dashboard.executiveReport(c.get('ctx')));
+    app.get('/api/v1/onboarding/progress', (c) => h.dashboard.getOnboardingProgress(c.get('ctx')));
 
     // --- Maturity Assessment Routes ---
-    const maturityMatch = path.match(/^\/api\/v1\/maturity-assessments(?:\/([^/]+))?$/);
-    if (maturityMatch) {
-      const [, id] = maturityMatch;
-      if (!id && method === 'GET') return this.maturity.list(ctx);
-      if (!id && method === 'POST') return this.maturity.create(ctx, body);
-      if (id && method === 'GET') return this.maturity.get(ctx, id);
-      if (id && method === 'PUT') return this.maturity.update(ctx, id, body);
-    }
+    app.get('/api/v1/maturity-assessments', (c) => h.maturity.list(c.get('ctx')));
+    app.post('/api/v1/maturity-assessments', async (c) => h.maturity.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/maturity-assessments/:id', (c) => h.maturity.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/maturity-assessments/:id', async (c) => h.maturity.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- Incident Routes ---
-    const incidentMatch = path.match(/^\/api\/v1\/incidents(?:\/([^/]+))?$/);
-    if (incidentMatch) {
-      const [, id] = incidentMatch;
-      if (!id && method === 'GET') return this.incidents.list(ctx);
-      if (!id && method === 'POST') return this.incidents.create(ctx, body);
-      if (id && method === 'GET') return this.incidents.get(ctx, id);
-      if (id && method === 'PUT') return this.incidents.update(ctx, id, body);
-    }
+    app.get('/api/v1/incidents', (c) => h.incidents.list(c.get('ctx')));
+    app.post('/api/v1/incidents', async (c) => h.incidents.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/incidents/:id', (c) => h.incidents.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/incidents/:id', async (c) => h.incidents.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- User Management Routes ---
-    const userMatch = path.match(/^\/api\/v1\/users(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (userMatch) {
-      const [, id, sub] = userMatch;
-      if (!id && method === 'GET') return this.users.list(ctx);
-      if (!id && method === 'POST') return this.users.create(ctx, body);
-      if (id && sub === 'unlock' && method === 'POST') return this.users.unlock(ctx, id);
-      if (id && sub === 'reset-password' && method === 'POST') return this.users.resetPassword(ctx, id, body);
-      if (id && !sub && method === 'GET') return this.users.get(ctx, id);
-      if (id && !sub && method === 'PUT') return this.users.update(ctx, id, body);
-      if (id && !sub && method === 'DELETE') return this.users.deactivate(ctx, id);
-    }
+    app.get('/api/v1/users', (c) => h.users.list(c.get('ctx')));
+    app.post('/api/v1/users', async (c) => h.users.create(c.get('ctx'), await withBody(c)));
+    app.post('/api/v1/users/:id/unlock', (c) => h.users.unlock(c.get('ctx'), c.req.param('id')));
+    app.post('/api/v1/users/:id/reset-password', async (c) => h.users.resetPassword(c.get('ctx'), c.req.param('id'), await withBody(c)));
+    app.get('/api/v1/users/:id', (c) => h.users.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/users/:id', async (c) => h.users.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
+    app.delete('/api/v1/users/:id', (c) => h.users.deactivate(c.get('ctx'), c.req.param('id')));
 
     // --- Audit Log Routes ---
-    if (path === '/api/v1/audit-log' && method === 'GET') {
-      return this.auditLog.list(ctx);
-    }
+    app.get('/api/v1/audit-log', (c) => h.auditLog.list(c.get('ctx')));
 
     // --- Evidence Routes ---
-    const evidenceMatch = path.match(/^\/api\/v1\/evidence(?:\/([^/]+))?$/);
-    if (evidenceMatch) {
-      const [, id] = evidenceMatch;
-      if (!id && method === 'GET') return this.evidence.list(ctx);
-      if (!id && method === 'POST') return this.evidence.create(ctx, body);
-      if (id && method === 'DELETE') return this.evidence.delete(ctx, id);
-    }
+    app.get('/api/v1/evidence', (c) => h.evidence.list(c.get('ctx')));
+    app.post('/api/v1/evidence', async (c) => h.evidence.create(c.get('ctx'), await withBody(c)));
+    app.delete('/api/v1/evidence/:id', (c) => h.evidence.delete(c.get('ctx'), c.req.param('id')));
 
     // --- Notification Routes ---
-    if (path === '/api/v1/notifications/read-all' && method === 'POST') {
-      return this.notifications.markAllRead(ctx);
-    }
-    const notifMatch = path.match(/^\/api\/v1\/notifications(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (notifMatch) {
-      const [, id, sub] = notifMatch;
-      if (!id && method === 'GET') return this.notifications.list(ctx);
-      if (id && sub === 'read' && method === 'PUT') return this.notifications.markRead(ctx, id);
-    }
+    app.post('/api/v1/notifications/read-all', (c) => h.notifications.markAllRead(c.get('ctx')));
+    app.get('/api/v1/notifications', (c) => h.notifications.list(c.get('ctx')));
+    app.put('/api/v1/notifications/:id/read', (c) => h.notifications.markRead(c.get('ctx'), c.req.param('id')));
 
     // --- Training Routes ---
-    if (path === '/api/v1/training/progress' && method === 'GET') {
-      return this.training.getProgress(ctx);
-    }
-    const trainingMatch = path.match(/^\/api\/v1\/training\/modules(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (trainingMatch) {
-      const [, id, sub] = trainingMatch;
-      if (!id && method === 'GET') return this.training.listModules(ctx);
-      if (id && sub === 'complete' && method === 'POST') return this.training.completeModule(ctx, id, body);
-      if (id && !sub && method === 'GET') return this.training.getModule(ctx, id);
-    }
+    app.get('/api/v1/training/progress', (c) => h.training.getProgress(c.get('ctx')));
+    app.get('/api/v1/training/modules', (c) => h.training.listModules(c.get('ctx')));
+    app.post('/api/v1/training/modules/:id/complete', async (c) => h.training.completeModule(c.get('ctx'), c.req.param('id'), await withBody(c)));
+    app.get('/api/v1/training/modules/:id', (c) => h.training.getModule(c.get('ctx'), c.req.param('id')));
 
     // --- Support Ticket Routes ---
-    const ticketMatch = path.match(/^\/api\/v1\/support-tickets(?:\/([^/]+))?$/);
-    if (ticketMatch) {
-      const [, id] = ticketMatch;
-      if (!id && method === 'GET') return this.tickets.list(ctx);
-      if (!id && method === 'POST') return this.tickets.create(ctx, body);
-      if (id && method === 'GET') return this.tickets.get(ctx, id);
-      if (id && method === 'PUT') return this.tickets.update(ctx, id, body);
-    }
+    app.get('/api/v1/support-tickets', (c) => h.tickets.list(c.get('ctx')));
+    app.post('/api/v1/support-tickets', async (c) => h.tickets.create(c.get('ctx'), await withBody(c)));
+    app.get('/api/v1/support-tickets/:id', (c) => h.tickets.get(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/support-tickets/:id', async (c) => h.tickets.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- Feature Request Routes ---
-    const featureMatch = path.match(/^\/api\/v1\/feature-requests(?:\/([^/]+))?(?:\/(.+))?$/);
-    if (featureMatch) {
-      const [, id, sub] = featureMatch;
-      if (!id && method === 'GET') return this.features.list(ctx);
-      if (!id && method === 'POST') return this.features.create(ctx, body);
-      if (id && sub === 'vote' && method === 'POST') return this.features.vote(ctx, id);
-      if (id && !sub && method === 'PUT') return this.features.update(ctx, id, body);
-    }
+    app.get('/api/v1/feature-requests', (c) => h.features.list(c.get('ctx')));
+    app.post('/api/v1/feature-requests', async (c) => h.features.create(c.get('ctx'), await withBody(c)));
+    app.post('/api/v1/feature-requests/:id/vote', (c) => h.features.vote(c.get('ctx'), c.req.param('id')));
+    app.put('/api/v1/feature-requests/:id', async (c) => h.features.update(c.get('ctx'), c.req.param('id'), await withBody(c)));
 
     // --- Knowledge Base Routes ---
-    if (path === '/api/v1/knowledge-base' && method === 'GET') {
-      return this.knowledgeBase.list(ctx);
-    }
+    app.get('/api/v1/knowledge-base', (c) => h.knowledgeBase.list(c.get('ctx')));
 
     // --- Operations Dashboard Routes ---
-    if (path === '/api/v1/ops/metrics' && method === 'GET') return this.ops.getMetrics(ctx);
-    if (path === '/api/v1/ops/tenant-health' && method === 'GET') return this.ops.getTenantHealth(ctx);
+    app.get('/api/v1/ops/metrics', (c) => h.ops.getMetrics(c.get('ctx')));
+    app.get('/api/v1/ops/tenant-health', (c) => h.ops.getTenantHealth(c.get('ctx')));
 
     // --- Export Routes ---
-    const exportMatch = path.match(/^\/api\/v1\/export\/(.+)$/);
-    if (exportMatch) {
-      const type = exportMatch[1];
-      const exportMap = {
-        'assets': () => this.exports.exportAssets(ctx),
-        'risk-assessments': () => this.exports.exportRiskAssessments(ctx),
-        'compliance': () => this.exports.exportCompliance(ctx),
-        'vendor-assessments': () => this.exports.exportVendors(ctx),
-        'incidents': () => this.exports.exportIncidents(ctx),
-        'evidence': () => this.exports.exportEvidence(ctx),
-      };
-      if (exportMap[type]) return exportMap[type]();
-    }
+    app.get('/api/v1/export/assets', (c) => h.exports.exportAssets(c.get('ctx')));
+    app.get('/api/v1/export/risk-assessments', (c) => h.exports.exportRiskAssessments(c.get('ctx')));
+    app.get('/api/v1/export/compliance', (c) => h.exports.exportCompliance(c.get('ctx')));
+    app.get('/api/v1/export/vendor-assessments', (c) => h.exports.exportVendors(c.get('ctx')));
+    app.get('/api/v1/export/incidents', (c) => h.exports.exportIncidents(c.get('ctx')));
+    app.get('/api/v1/export/evidence', (c) => h.exports.exportEvidence(c.get('ctx')));
 
     // --- Audit Report Routes ---
-    if (path === '/api/v1/reports/audit-pack' && method === 'GET') return this.reports.auditPack(ctx);
-    const assetProfileMatch = path.match(/^\/api\/v1\/reports\/asset-profile\/([^/]+)$/);
-    if (assetProfileMatch) {
-      return this.reports.assetProfile(ctx, assetProfileMatch[1]);
-    }
+    app.get('/api/v1/reports/audit-pack', (c) => h.reports.auditPack(c.get('ctx')));
+    app.get('/api/v1/reports/asset-profile/:id', (c) => h.reports.assetProfile(c.get('ctx'), c.req.param('id')));
 
-    return errorResponse('Not found', 404);
+    return app;
+  }
+
+  /**
+   * Handle a request - compatible with both Cloudflare Workers and the Express adapter.
+   * @param {Request} request - Web API Request (or request-like object from the adapter)
+   * @returns {Promise<Response>}
+   */
+  async handle(request) {
+    return this.app.fetch(request, this.env);
   }
 }

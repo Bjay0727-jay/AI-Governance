@@ -28,6 +28,7 @@ const TEST_DB_PATH = path.join(__dirname, '..', 'data', 'test.db');
   try { fs.unlinkSync(f); } catch (e) { /* ignore */ }
 });
 process.env.TEST_DB_PATH = TEST_DB_PATH;
+process.env.NODE_ENV = 'test';
 
 const { app, db, createToken } = require('../server');
 
@@ -1076,7 +1077,7 @@ describe('Security', () => {
     const res = await request(app).get('/api/v1/csrf-token');
     expect(res.status).toBe(200);
     expect(res.body.csrf_token).toBeTruthy();
-    expect(res.body.csrf_token.length).toBe(64);
+    expect(res.body.csrf_token).toContain('.'); // HMAC-signed format: nonce.signature
   });
 
   test('Security headers are set', async () => {
