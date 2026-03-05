@@ -32,6 +32,7 @@ import { DocsHandlers } from './handlers/docs.js';
 import { TenantHandlers } from './handlers/tenant.js';
 import { BackupHandlers } from './handlers/backup.js';
 import { FrameworkUpdateHandlers } from './handlers/framework-updates.js';
+import { ComplianceAlertHandlers } from './handlers/compliance-alerts.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { rateLimiter, authRateLimiter } from './middleware/rate-limiter.js';
 import { jsonResponse, errorResponse, generateCsrfToken, validateCsrfToken } from './utils.js';
@@ -67,6 +68,7 @@ export class Router {
       tenant: new TenantHandlers(env),
       backup: new BackupHandlers(env),
       frameworkUpdates: new FrameworkUpdateHandlers(env),
+      complianceAlerts: new ComplianceAlertHandlers(env),
     };
 
     this.app = this._buildApp(handlers);
@@ -151,6 +153,9 @@ export class Router {
     app.get('/api/v1/implementations', (c) => h.compliance.listImplementations(c.get('ctx')));
     app.post('/api/v1/implementations', async (c) => h.compliance.createImplementation(c.get('ctx'), await withBody(c)));
     app.put('/api/v1/implementations/:id', async (c) => h.compliance.updateImplementation(c.get('ctx'), c.req.param('id'), await withBody(c)));
+
+    // --- Compliance Alerting Routes ---
+    app.get('/api/v1/compliance-alerts', (c) => h.complianceAlerts.getAlerts(c.get('ctx')));
 
     // --- Vendor Assessment Routes ---
     app.get('/api/v1/vendor-assessments', (c) => h.vendors.list(c.get('ctx')));
