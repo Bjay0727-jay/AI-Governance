@@ -9,8 +9,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - JWT_SECRET=${JWT_SECRET:-}
-      - CSRF_SECRET=${CSRF_SECRET:-}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
     volumes:
       - forgeai-data:/app/data
     restart: unless-stopped

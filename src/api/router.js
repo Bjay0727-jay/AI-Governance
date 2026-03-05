@@ -30,6 +30,8 @@ import { ExportHandlers } from './handlers/exports.js';
 import { ReportHandlers } from './handlers/reports.js';
 import { DocsHandlers } from './handlers/docs.js';
 import { TenantHandlers } from './handlers/tenant.js';
+import { BackupHandlers } from './handlers/backup.js';
+import { requestLogger } from './middleware/request-logger.js';
 import { jsonResponse, errorResponse, generateCsrfToken, validateCsrfToken } from './utils.js';
 
 export class Router {
@@ -61,6 +63,7 @@ export class Router {
       reports: new ReportHandlers(env),
       docs: new DocsHandlers(),
       tenant: new TenantHandlers(env),
+      backup: new BackupHandlers(env),
     };
 
     this.app = this._buildApp(handlers);
@@ -70,6 +73,9 @@ export class Router {
     const app = new Hono({ strict: false });
     const auth = this.auth;
     const env = this.env;
+
+    // --- Structured request logging ---
+    app.use('*', requestLogger());
 
     // --- Public Routes (no auth) ---
     app.post('/api/v1/auth/register', async (c) => auth.register(await c.req.json()));
@@ -230,6 +236,10 @@ export class Router {
     // --- Audit Report Routes ---
     app.get('/api/v1/reports/audit-pack', (c) => h.reports.auditPack(c.get('ctx')));
     app.get('/api/v1/reports/asset-profile/:id', (c) => h.reports.assetProfile(c.get('ctx'), c.req.param('id')));
+
+    // --- Backup Routes (admin only) ---
+    app.post('/api/v1/ops/backup', (c) => h.backup.createSnapshot(c.get('ctx')));
+    app.get('/api/v1/ops/backup/status', (c) => h.backup.getStatus(c.get('ctx')));
 
     return app;
   }

@@ -270,6 +270,35 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '100kb' }));
 
+// Structured request logging for API routes
+app.use('/api/', (req, res, next) => {
+  const requestId = req.headers['x-request-id'] || crypto.randomBytes(8).toString('hex');
+  req.requestId = requestId;
+  const start = Date.now();
+
+  res.on('finish', () => {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+      request_id: requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: Date.now() - start,
+      ip: req.ip,
+      user_agent: req.headers['user-agent'] || null,
+    };
+    if (res.statusCode >= 500) {
+      console.error(JSON.stringify(logEntry));
+    } else if (process.env.NODE_ENV !== 'test') {
+      console.log(JSON.stringify(logEntry));
+    }
+  });
+
+  res.setHeader('X-Request-ID', requestId);
+  next();
+});
+
 // Global rate limiter: 200 requests per minute per IP
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,

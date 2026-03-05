@@ -2,6 +2,8 @@
 # ForgeAI Govern™ - Cloudflare Workers Configuration
 # ============================================================================
 # Deployment: npx wrangler deploy
+# Staging:    npx wrangler deploy --env staging
+# Production: npx wrangler deploy --env production
 # Local dev:  npx wrangler dev
 # ============================================================================
 
@@ -34,5 +36,64 @@ binding = "EVIDENCE_STORE"
 bucket_name = "forgeai-evidence"
 
 [[kv_namespaces]]
+binding = "SESSION_CACHE"
+id = "72057762e6e7432baf6af57956f78b65"
+
+# ============================================================================
+# Staging Environment
+# ============================================================================
+# Deploy: npx wrangler deploy --env staging
+# Secrets: npx wrangler secret put JWT_SECRET --env staging
+# ============================================================================
+
+[env.staging]
+name = "forgeai-govern-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+ALLOWED_ORIGINS = "https://staging.forgeai-govern.workers.dev"
+
+# Staging D1 — create with: npx wrangler d1 create forgeai-govern-db-staging
+# Then update database_id below
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "forgeai-govern-db-staging"
+database_id = "REPLACE_WITH_STAGING_DB_ID"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "EVIDENCE_STORE"
+bucket_name = "forgeai-evidence-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "SESSION_CACHE"
+id = "REPLACE_WITH_STAGING_KV_ID"
+
+# ============================================================================
+# Production Environment
+# ============================================================================
+# Deploy: npx wrangler deploy --env production
+# Secrets: npx wrangler secret put JWT_SECRET --env production
+# ============================================================================
+
+[env.production]
+name = "forgeai-govern"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://app.forgeai.com"
+
+# Production D1 — use the same IDs as the top-level config
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "forgeai-govern-db"
+database_id = "c20c9759-46e2-4b9d-9744-7c72759b640d"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "EVIDENCE_STORE"
+bucket_name = "forgeai-evidence"
+
+[[env.production.kv_namespaces]]
 binding = "SESSION_CACHE"
 id = "72057762e6e7432baf6af57956f78b65"
