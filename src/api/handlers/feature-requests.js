@@ -107,7 +107,11 @@ export class FeatureRequestHandlers {
 
     await this.db.prepare(`UPDATE feature_requests SET ${updates.join(', ')} WHERE id = ?`)
       .bind(...values, id).run();
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'feature_request', id, {});
+    const changedFields = Object.keys(body);
+    const before = {};
+    const after = {};
+    for (const f of changedFields) { before[f] = existing[f]; after[f] = body[f]; }
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'feature_request', id, { updated_fields: changedFields, before, after });
 
     const updated = await this.db.prepare('SELECT * FROM feature_requests WHERE id = ?').bind(id).first();
     return jsonResponse({ data: updated });

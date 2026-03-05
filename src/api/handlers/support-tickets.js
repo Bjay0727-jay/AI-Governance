@@ -97,7 +97,11 @@ export class SupportTicketHandlers {
 
     await this.db.prepare(`UPDATE support_tickets SET ${updates.join(', ')} WHERE id = ?`)
       .bind(...values, id).run();
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'support_ticket', id, {});
+    const changedFields = Object.keys(body);
+    const before = {};
+    const after = {};
+    for (const f of changedFields) { before[f] = existing[f]; after[f] = body[f]; }
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'support_ticket', id, { updated_fields: changedFields, before, after });
 
     const updated = await this.db.prepare('SELECT * FROM support_tickets WHERE id = ?').bind(id).first();
     return jsonResponse({ data: updated });

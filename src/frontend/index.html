@@ -29,6 +29,10 @@
                         <label for="login-password">Password</label>
                         <input type="password" id="login-password" required placeholder="Min 12 characters">
                     </div>
+                    <div id="mfa-group" class="form-group hidden">
+                        <label for="login-mfa">Authenticator Code</label>
+                        <input type="text" id="login-mfa" placeholder="6-digit code" maxlength="6" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}">
+                    </div>
                     <button type="submit" class="btn btn-primary btn-full">Sign In</button>
                     <div id="login-error" class="error-message hidden"></div>
                 </form>

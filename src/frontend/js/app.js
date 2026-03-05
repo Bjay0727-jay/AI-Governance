@@ -9,7 +9,7 @@ const App = {
 
   init() {
     this.bindEvents();
-    if (API.loadTokens()) {
+    if (API.loadSession()) {
       this.showApp();
     } else {
       this.showScreen('login-screen');
@@ -75,15 +75,35 @@ const App = {
 
   // --- Authentication ---
 
+  _pendingMfaLogin: null,
+
   async handleLogin(e) {
     e.preventDefault();
     const email = document.getElementById('login-email').value;
     const password = document.getElementById('login-password').value;
+    const mfaInput = document.getElementById('login-mfa');
+    const mfaCode = mfaInput ? mfaInput.value : null;
     const errorEl = document.getElementById('login-error');
     errorEl.classList.add('hidden');
 
     try {
-      await API.login(email, password);
+      const result = await API.login(
+        this._pendingMfaLogin?.email || email,
+        this._pendingMfaLogin?.password || password,
+        mfaCode || undefined
+      );
+
+      if (result.mfa_required) {
+        this._pendingMfaLogin = { email, password };
+        const mfaGroup = document.getElementById('mfa-group');
+        if (mfaGroup) {
+          mfaGroup.classList.remove('hidden');
+          document.getElementById('login-mfa').focus();
+        }
+        return;
+      }
+
+      this._pendingMfaLogin = null;
       this.showApp();
     } catch (err) {
       errorEl.textContent = err.message;

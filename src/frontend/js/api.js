@@ -2,56 +2,47 @@
  * ForgeAI Govern™ - API Client
  *
  * Handles all communication with the backend API.
- * Manages JWT tokens, automatic refresh, and request/response formatting.
+ * Tokens are stored in httpOnly cookies (set by the server).
+ * Only non-sensitive user/tenant metadata is kept in sessionStorage.
  */
 
 const API = {
   baseUrl: '/api/v1',
-  accessToken: null,
-  refreshToken: null,
   csrfToken: null,
   user: null,
   tenant: null,
+  authenticated: false,
 
-  // --- Token Management ---
-
-  setTokens(accessToken, refreshToken) {
-    this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
-    localStorage.setItem('forgeai_access_token', accessToken);
-    localStorage.setItem('forgeai_refresh_token', refreshToken);
-  },
-
-  loadTokens() {
-    this.accessToken = localStorage.getItem('forgeai_access_token');
-    this.refreshToken = localStorage.getItem('forgeai_refresh_token');
-    this.user = JSON.parse(localStorage.getItem('forgeai_user') || 'null');
-    this.tenant = JSON.parse(localStorage.getItem('forgeai_tenant') || 'null');
-    if (this.accessToken) this.fetchCsrfToken();
-    return !!this.accessToken;
-  },
+  // --- Session Metadata (non-sensitive, UI-only) ---
 
   setUser(user, tenant) {
     this.user = user;
     this.tenant = tenant;
-    localStorage.setItem('forgeai_user', JSON.stringify(user));
-    localStorage.setItem('forgeai_tenant', JSON.stringify(tenant));
+    this.authenticated = true;
+    sessionStorage.setItem('forgeai_user', JSON.stringify(user));
+    sessionStorage.setItem('forgeai_tenant', JSON.stringify(tenant));
+  },
+
+  loadSession() {
+    this.user = JSON.parse(sessionStorage.getItem('forgeai_user') || 'null');
+    this.tenant = JSON.parse(sessionStorage.getItem('forgeai_tenant') || 'null');
+    this.authenticated = !!this.user;
+    if (this.authenticated) this.fetchCsrfToken();
+    return this.authenticated;
   },
 
   clearAuth() {
-    this.accessToken = null;
-    this.refreshToken = null;
     this.user = null;
     this.tenant = null;
-    localStorage.removeItem('forgeai_access_token');
-    localStorage.removeItem('forgeai_refresh_token');
-    localStorage.removeItem('forgeai_user');
-    localStorage.removeItem('forgeai_tenant');
+    this.authenticated = false;
+    this.csrfToken = null;
+    sessionStorage.removeItem('forgeai_user');
+    sessionStorage.removeItem('forgeai_tenant');
   },
 
   async fetchCsrfToken() {
     try {
-      const response = await fetch(`${this.baseUrl}/csrf-token`);
+      const response = await fetch(`${this.baseUrl}/csrf-token`, { credentials: 'same-origin' });
       if (response.ok) {
         const data = await response.json();
         this.csrfToken = data.csrf_token;
@@ -63,21 +54,19 @@ const API = {
 
   async request(method, path, body = null, retry = true) {
     const headers = { 'Content-Type': 'application/json' };
-    if (this.accessToken) headers['Authorization'] = `Bearer ${this.accessToken}`;
-    // Include CSRF token on state-changing requests
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && this.csrfToken) {
       headers['X-CSRF-Token'] = this.csrfToken;
     }
 
-    const options = { method, headers };
+    const options = { method, headers, credentials: 'same-origin' };
     if (body && ['POST', 'PUT', 'PATCH'].includes(method)) {
       options.body = JSON.stringify(body);
     }
 
     const response = await fetch(`${this.baseUrl}${path}`, options);
 
-    // Handle token expiry
-    if (response.status === 401 && retry && this.refreshToken) {
+    // Handle token expiry — cookie-based refresh
+    if (response.status === 401 && retry && this.authenticated) {
       const refreshed = await this.doRefresh();
       if (refreshed) return this.request(method, path, body, false);
       this.clearAuth();
@@ -95,11 +84,10 @@ const API = {
       const response = await fetch(`${this.baseUrl}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: this.refreshToken }),
+        body: JSON.stringify({}),
+        credentials: 'same-origin',
       });
       if (!response.ok) return false;
-      const data = await response.json();
-      this.setTokens(data.access_token, data.refresh_token);
       return true;
     } catch {
       return false;
@@ -108,35 +96,60 @@ const API = {
 
   // --- Auth Endpoints ---
 
-  async login(email, password) {
-    const data = await this.request('POST', '/auth/login', { email, password });
-    this.setTokens(data.access_token, data.refresh_token);
+  async login(email, password, mfaCode) {
+    const body = { email, password };
+    if (mfaCode) body.mfa_code = mfaCode;
+
+    const response = await fetch(`${this.baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Login failed');
+
+    // MFA challenge — password correct but TOTP needed
+    if (data.mfa_required) return data;
+
     this.setUser(data.user, data.tenant);
     await this.fetchCsrfToken();
     return data;
   },
 
   async register(orgName, firstName, lastName, email, password) {
-    const data = await this.request('POST', '/auth/register', {
-      organization_name: orgName, first_name: firstName,
-      last_name: lastName, email, password,
+    const response = await fetch(`${this.baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        organization_name: orgName, first_name: firstName,
+        last_name: lastName, email, password,
+      }),
+      credentials: 'same-origin',
     });
-    this.setTokens(data.access_token, data.refresh_token);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Registration failed');
     this.setUser(data.user, data.tenant);
     await this.fetchCsrfToken();
     return data;
   },
 
   async logout() {
-    // Server-side token revocation
-    if (this.refreshToken) {
-      try {
-        await this.request('POST', '/auth/logout', { refresh_token: this.refreshToken });
-      } catch { /* Best-effort logout */ }
-    }
-    this.csrfToken = null;
+    try {
+      await fetch(`${this.baseUrl}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        credentials: 'same-origin',
+      });
+    } catch { /* Best-effort logout */ }
     this.clearAuth();
   },
+
+  // --- MFA ---
+  enrollMfa() { return this.request('POST', '/auth/mfa/enroll'); },
+  verifyMfa(code) { return this.request('POST', '/auth/mfa/verify', { code }); },
+  disableMfa(code) { return this.request('POST', '/auth/mfa/disable', { code }); },
 
   // --- AI Assets ---
   getAssets(params = {}) {

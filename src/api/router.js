@@ -31,7 +31,9 @@ import { ReportHandlers } from './handlers/reports.js';
 import { DocsHandlers } from './handlers/docs.js';
 import { TenantHandlers } from './handlers/tenant.js';
 import { BackupHandlers } from './handlers/backup.js';
+import { FrameworkUpdateHandlers } from './handlers/framework-updates.js';
 import { requestLogger } from './middleware/request-logger.js';
+import { rateLimiter, authRateLimiter } from './middleware/rate-limiter.js';
 import { jsonResponse, errorResponse, generateCsrfToken, validateCsrfToken } from './utils.js';
 
 export class Router {
@@ -64,6 +66,7 @@ export class Router {
       docs: new DocsHandlers(),
       tenant: new TenantHandlers(env),
       backup: new BackupHandlers(env),
+      frameworkUpdates: new FrameworkUpdateHandlers(env),
     };
 
     this.app = this._buildApp(handlers);
@@ -77,11 +80,18 @@ export class Router {
     // --- Structured request logging ---
     app.use('*', requestLogger());
 
+    // --- Per-tenant rate limiting (200 req/min, falls back to per-IP) ---
+    app.use('/api/v1/*', rateLimiter());
+
+    // --- Auth rate limiting (10 attempts / 15 min) ---
+    app.use('/api/v1/auth/login', authRateLimiter());
+    app.use('/api/v1/auth/register', authRateLimiter());
+
     // --- Public Routes (no auth) ---
     app.post('/api/v1/auth/register', async (c) => auth.register(await c.req.json()));
     app.post('/api/v1/auth/login', async (c) => auth.login(await c.req.json(), c.req.raw));
-    app.post('/api/v1/auth/refresh', async (c) => auth.refresh(await c.req.json()));
-    app.post('/api/v1/auth/logout', async (c) => auth.logout(await c.req.json()));
+    app.post('/api/v1/auth/refresh', async (c) => auth.refresh(await c.req.json(), c.req.raw));
+    app.post('/api/v1/auth/logout', async (c) => auth.logout(await c.req.json(), c.req.raw));
     app.get('/api/v1/docs', () => h.docs.getDocs());
     app.get('/api/v1/csrf-token', async () => {
       const token = await generateCsrfToken(env.JWT_SECRET);
@@ -240,6 +250,16 @@ export class Router {
     // --- Backup Routes (admin only) ---
     app.post('/api/v1/ops/backup', (c) => h.backup.createSnapshot(c.get('ctx')));
     app.get('/api/v1/ops/backup/status', (c) => h.backup.getStatus(c.get('ctx')));
+
+    // --- MFA Routes ---
+    app.post('/api/v1/auth/mfa/enroll', (c) => auth.mfaEnroll(c.get('ctx')));
+    app.post('/api/v1/auth/mfa/verify', async (c) => auth.mfaVerify(c.get('ctx'), await withBody(c)));
+    app.post('/api/v1/auth/mfa/disable', async (c) => auth.mfaDisable(c.get('ctx'), await withBody(c)));
+
+    // --- Framework Update Routes ---
+    app.get('/api/v1/framework-updates', (c) => h.frameworkUpdates.listFrameworks(c.get('ctx')));
+    app.post('/api/v1/framework-updates', async (c) => h.frameworkUpdates.recordUpdate(c.get('ctx'), await withBody(c)));
+    app.post('/api/v1/framework-updates/:id/acknowledge', (c) => h.frameworkUpdates.acknowledgeUpdate(c.get('ctx'), c.req.param('id')));
 
     return app;
   }

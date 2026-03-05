@@ -173,7 +173,11 @@ export class MaturityHandlers {
       `UPDATE maturity_assessments SET ${updates.join(', ')} WHERE id = ? AND tenant_id = ?`
     ).bind(...values, id, ctx.user.tenant_id).run();
 
-    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'maturity_assessment', id, {});
+    const changedFields = Object.keys(body);
+    const before = {};
+    const after = {};
+    for (const f of changedFields) { before[f] = existing[f]; after[f] = body[f]; }
+    await ctx.auth.auditLog(ctx.user.tenant_id, ctx.user.user_id, 'update', 'maturity_assessment', id, { updated_fields: changedFields, before, after });
     const updated = await this.db.prepare('SELECT * FROM maturity_assessments WHERE id = ?').bind(id).first();
     return jsonResponse({ data: updated });
   }
