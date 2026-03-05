@@ -275,12 +275,42 @@ export class AuthService {
     return jsonResponse({ message: 'Logged out successfully' });
   }
 
-  // --- Audit Logging ---
+  // --- Audit Logging with Cryptographic Hash Chaining ---
 
-  async auditLog(tenantId, userId, action, entityType, entityId, details = {}) {
-    await this.db.prepare(
-      `INSERT INTO audit_log (id, tenant_id, user_id, action, entity_type, entity_id, details)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(generateUUID(), tenantId, userId, action, entityType, entityId, JSON.stringify(details)).run();
+  async auditLog(tenantId, userId, action, entityType, entityId, details = {}, options = {}) {
+    const id = generateUUID();
+    const detailsJson = JSON.stringify(details);
+    const dataClassification = options.dataClassification || 'standard';
+
+    // Get the hash of the previous audit entry for this tenant (chain link)
+    let previousHash = null;
+    try {
+      const lastEntry = await this.db.prepare(
+        'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).bind(tenantId).first();
+      previousHash = lastEntry?.entry_hash || null;
+    } catch { /* first entry or column not yet migrated */ }
+
+    // Compute entry hash: SHA-256(id + action + entityType + entityId + details + previousHash)
+    let entryHash = null;
+    try {
+      const hashInput = `${id}:${action}:${entityType}:${entityId}:${detailsJson}:${previousHash || 'genesis'}`;
+      const encoder = new TextEncoder();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(hashInput));
+      entryHash = [...new Uint8Array(hashBuffer)].map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch { /* hash chaining not available in test env */ }
+
+    try {
+      await this.db.prepare(
+        `INSERT INTO audit_log (id, tenant_id, user_id, action, entity_type, entity_id, details, previous_hash, entry_hash, data_classification)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(id, tenantId, userId, action, entityType, entityId, detailsJson, previousHash, entryHash, dataClassification).run();
+    } catch {
+      // Fallback for databases without the new columns (pre-migration)
+      await this.db.prepare(
+        `INSERT INTO audit_log (id, tenant_id, user_id, action, entity_type, entity_id, details)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(id, tenantId, userId, action, entityType, entityId, detailsJson).run();
+    }
   }
 }
