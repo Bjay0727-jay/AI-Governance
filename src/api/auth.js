@@ -255,6 +255,8 @@ export class AuthService {
       await this.auditLog(tenantId, userId, 'register', 'tenant', tenantId, { organization: organization_name });
 
       const resp = jsonResponse({
+        access_token: accessToken,
+        refresh_token: refreshToken,
         token_type: 'Bearer',
         expires_in: ACCESS_TOKEN_EXPIRY,
         user: { id: userId, email, first_name, last_name, role: 'admin', mfa_enabled: false },
@@ -330,6 +332,8 @@ export class AuthService {
     const mfaRequired = MFA_REQUIRED_ROLES.includes(user.role) && !user.mfa_enabled;
 
     const resp = jsonResponse({
+      access_token: accessToken,
+      refresh_token: refreshToken,
       token_type: 'Bearer',
       expires_in: ACCESS_TOKEN_EXPIRY,
       user: {
@@ -373,7 +377,7 @@ export class AuthService {
       REFRESH_TOKEN_EXPIRY
     );
 
-    const resp = jsonResponse({ token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
+    const resp = jsonResponse({ access_token: newAccess, refresh_token: newRefresh, token_type: 'Bearer', expires_in: ACCESS_TOKEN_EXPIRY });
     return setTokenCookies(resp, newAccess, newRefresh, this._isSecure());
   }
 

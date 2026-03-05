@@ -1,5 +1,7 @@
 module.exports = {
   testEnvironment: 'node',
+  // Exclude Miniflare integration tests from default run (use npm run test:integration)
+  testPathIgnorePatterns: ['/node_modules/', 'worker\\.integration\\.test\\.js'],
   // Transform ESM modules in src/api/ to CJS so Jest can load them
   transform: {
     '(src/api/.+\\.js$|node_modules/hono/.+\\.js$)': [

@@ -49,11 +49,20 @@ async function sendWorkerResponse(workerResponse, res) {
 
   // Forward all response headers
   if (workerResponse.headers) {
+    // Handle Set-Cookie specially — it can have multiple values
+    const setCookies = typeof workerResponse.headers.getSetCookie === 'function'
+      ? workerResponse.headers.getSetCookie()
+      : [];
+    if (setCookies.length > 0) {
+      res.setHeader('Set-Cookie', setCookies);
+    }
+
     const entries = typeof workerResponse.headers.entries === 'function'
       ? workerResponse.headers.entries()
       : Object.entries(workerResponse.headers);
     for (const [key, value] of entries) {
-      if (key.toLowerCase() !== 'transfer-encoding' && key.toLowerCase() !== 'content-length') {
+      const lower = key.toLowerCase();
+      if (lower !== 'transfer-encoding' && lower !== 'content-length' && lower !== 'set-cookie') {
         res.setHeader(key, value);
       }
     }

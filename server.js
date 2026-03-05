@@ -229,6 +229,30 @@ runColumnMigration('audit_log', 'data_classification', "ALTER TABLE audit_log AD
 runColumnMigration('tenants', 'hipaa_baa_signed_at', 'ALTER TABLE tenants ADD COLUMN hipaa_baa_signed_at TEXT;');
 runColumnMigration('tenants', 'hipaa_baa_signed_by', 'ALTER TABLE tenants ADD COLUMN hipaa_baa_signed_by TEXT;');
 
+// --- Migration 0004: Framework updates table and sub-control hierarchy ---
+runColumnMigration('compliance_controls', 'parent_control_id', 'ALTER TABLE compliance_controls ADD COLUMN parent_control_id TEXT;');
+
+runMigration('framework_updates', `
+  CREATE TABLE IF NOT EXISTS framework_updates (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(id),
+    framework_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    effective_date TEXT,
+    impact_level TEXT DEFAULT 'medium',
+    affected_controls TEXT DEFAULT '[]',
+    status TEXT DEFAULT 'pending_review',
+    created_by TEXT REFERENCES users(id),
+    acknowledged_by TEXT REFERENCES users(id),
+    acknowledged_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_framework_updates_tenant ON framework_updates(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_framework_updates_status ON framework_updates(tenant_id, status);
+`);
+
 // --- Build Environment Object (mimics Cloudflare env) ---
 const env = {
   DB: db,
