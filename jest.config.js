@@ -11,4 +11,12 @@ module.exports = {
   },
   // Transform src/api and hono (ESM packages) to CJS for Jest
   transformIgnorePatterns: ['/node_modules/(?!hono/)'],
+  // Coverage configuration
+  collectCoverageFrom: [
+    'src/api/**/*.js',
+    '!src/api/worker.js',
+    '!src/api/handlers/docs.js',
+  ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'text-summary', 'json-summary', 'lcov'],
 };

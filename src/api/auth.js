@@ -105,7 +105,13 @@ export class AuthService {
     const authHeader = request.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
     const token = authHeader.slice(7);
-    return await this.verifyToken(token);
+    const payload = await this.verifyToken(token);
+    if (!payload) return null;
+    // Reject refresh tokens used as access tokens
+    if (payload.type && payload.type !== 'access') return null;
+    // Require essential claims
+    if (!payload.user_id || !payload.tenant_id) return null;
+    return payload;
   }
 
   authorize(user, requiredRoles) {
