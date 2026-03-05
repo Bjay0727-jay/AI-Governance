@@ -58,7 +58,7 @@ ALLOWED_ORIGINS = "https://staging.forgeai-govern.workers.dev"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "forgeai-govern-db-staging"
-database_id = "REPLACE_WITH_STAGING_DB_ID"
+database_id = "fab18886-416f-45ed-88e0-51e18ec8442a"
 migrations_dir = "migrations"
 
 [[env.staging.r2_buckets]]
@@ -67,7 +67,7 @@ bucket_name = "forgeai-evidence-staging"
 
 [[env.staging.kv_namespaces]]
 binding = "SESSION_CACHE"
-id = "REPLACE_WITH_STAGING_KV_ID"
+id = "1fde6caf27e3498b8fe496fd3354d62a"
 
 # ============================================================================
 # Production Environment
